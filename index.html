@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diplomatic - Web</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="game-container">
+        <!-- Header -->
+        <header>
+            <h1>> GRAND STRATEGY COMMAND <</h1>
+            <div id="gameTimer" class="timer">NEXT CYCLE: --:--:--</div>
+        </header>
+
+        <!-- Main Game Area -->
+        <main>
+            <!-- Country Creation Modal -->
+            <div id="creationModal" class="modal">
+                <div class="modal-content">
+                    <h2>Create Your Country</h2>
+                    <form id="countryCreationForm">
+                        <input type="text" id="countryName" placeholder="Country Name" required>
+                        <div class="country-type-selector">
+                <label for="countryType">SELECT COUNTRY TYPE:</label>
+                <select id="countryType" required>
+                    <option value="" disabled selected>-- CHOOSE YOUR DOCTRINE --</option>
+                    <option value="economic">💰 ECONOMIC - Gold focus, resource generation</option>
+                    <option value="wartime">⚔️ WARTIME - Military focus, combat bonuses</option>
+                </select>
+                <div class="type-description" id="typeDescription">
+                    <span class="economic-desc hidden">📈 Economic: Generates more gold, but soldiers cost more</span>
+                    <span class="wartime-desc hidden">💥 Wartime: Better at combat, special military abilities</span>
+                </div>
+            </div>
+                        <div class="flag-upload">
+                            <label for="flagUpload">Upload Flag (optional)</label>
+                            <input type="file" id="flagUpload" accept="image/*">
+                        </div>
+                        <button type="submit">Start Game</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Player Dashboard -->
+            <div id="playerDashboard" class="dashboard hidden">
+                <div class="country-info">
+                    <h2 id="displayCountryName"></h2>
+                    <div id="flagDisplay"></div>
+                    <p>Type: <span id="countryType"></span></p>
+                    <div class="resources">
+                        <div class="resource">LIVES: <span id="lives">3</span></div>
+                        <div class="resource">GOLD: <span id="gold">0</span></div>
+                        <div class="resource">SOLDIERS: <span id="soldiers">0</span></div>
+                        <div class="resource">ACTIONS: <span id="actions">0</span></div>
+                        <div class="resource">LEVEL: <span id="level">1</span></div>
+                        <div class="resource">UPGRADE PTS: <span id="upgradePoints">0</span></div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="actions-panel">
+                    <button id="buySoldier" class="action-btn">> BUY SOLDIER <</button>
+                    <button id="fortify" class="action-btn">> FORTIFY <</button>
+                    <button id="healNeighbor" class="action-btn">> HEAL ALLY <</button>
+                    <button id="upgrade" class="action-btn">> RESEARCH <</button>
+                </div>
+
+                <!-- Attack Panel -->
+                <div class="attack-panel">
+                    <h3>> COMBAT ORDERS <</h3>
+                    <select id="neighborSelect">
+                        <option value="">SELECT TARGET...</option>
+                    </select>
+                    <button id="attackBtn" class="action-btn attack-btn">> LAUNCH ATTACK <</button>
+                <div id="attackResult"></div>
+            </div>
+
+                <!-- Trade Panel -->
+                <div class="trade-panel">
+                    <h3>> TRADE COMMANDS <</h3>
+                    <select id="tradePartner">
+                        <option value="">SELECT TRADE PARTNER...</option>
+                    </select>
+                    <input type="number" id="tradeGold" placeholder="GOLD" min="0">
+                    <input type="number" id="tradeSoldiers" placeholder="SOLDIERS" min="0">
+                    <input type="number" id="tradeActions" placeholder="ACTIONS (NEIGHBORS ONLY)" min="0">
+                    <button id="proposeTrade" class="action-btn">> PROPOSE TRADE <</button>
+                </div>
+
+                <!-- Trade Notifications Panel -->
+            <div class="trade-notifications hidden" id="tradeNotifications">
+                <h3>> INCOMING TRANSMISSIONS <</h3>
+                <div id="tradeProposalsList" class="trade-proposals-list"></div>
+            </div>
+
+<!-- Add this to your existing trade panel to show trade status -->
+<div id="myTradeOffers" class="my-trade-offers hidden">
+    <h4>My Pending Offers</h4>
+    <div id="myPendingTrades"></div>
+</div>
+                <!-- Game Map (simplified) -->
+                <div class="game-map">
+                    <h3>World Map</h3>
+                    <div id="mapContainer" class="map-container">
+                        <!-- Map will be populated dynamically -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+
+<!-- Game Scripts - IMPORTANT: Load in this order -->
+<script src="js/firebase-config.js"></script>
+<script src="js/config.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,835 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Courier New', 'VT323', 'Share Tech Mono', monospace;
+    background: #0a1a0a;
+    min-height: 100vh;
+    color: #7cfc00;
+    position: relative;
+    overflow-x: hidden;
+}
+
+/* Retro Scanlines - Thicker, more authentic */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 255, 0, 0.03) 0px,
+        rgba(0, 0, 0, 0.2) 1px,
+        rgba(0, 255, 0, 0.03) 2px,
+        rgba(0, 0, 0, 0.1) 3px
+    );
+    pointer-events: none;
+    z-index: 1000;
+    mix-blend-mode: multiply;
+    animation: flicker 0.15s infinite;
+}
+
+/* CRT Curvature Effect */
+body::after {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(
+        circle at center,
+        transparent 0%,
+        rgba(0, 30, 0, 0.4) 80%,
+        #0a1a0a 100%
+    );
+    pointer-events: none;
+    z-index: 1001;
+}
+
+@keyframes flicker {
+    0% { opacity: 0.95; }
+    50% { opacity: 1; }
+    100% { opacity: 0.95; }
+}
+
+/* Old Monitor Phosphor Glow */
+.game-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+    position: relative;
+    text-shadow: 0 0 5px #7cfc00, 0 0 10px #7cfc00;
+}
+
+/* Vintage Static Effect */
+.static-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="1" stitchTiles="stitch"/></filter><rect width="100" height="100" filter="url(%23noise)" opacity="0.08"/></svg>');
+    pointer-events: none;
+    z-index: 1002;
+    opacity: 0.15;
+    mix-blend-mode: screen;
+}
+
+header {
+    background: #0f1f0f;
+    border: 3px solid #2e8b57;
+    border-radius: 0;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: inset 0 0 30px #2e8b57,
+                0 0 20px #7cfc00;
+    position: relative;
+    image-rendering: pixelated;
+}
+
+header::before {
+    content: '> TACTICAL COMMS v2.03 <';
+    position: absolute;
+    top: -12px;
+    left: 20px;
+    background: #0f1f0f;
+    padding: 0 10px;
+    font-size: 12px;
+    color: #7cfc00;
+    letter-spacing: 2px;
+    border: 1px solid #2e8b57;
+    font-family: 'Courier New', monospace;
+}
+
+header h1 {
+    font-size: 2.5em;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    text-shadow: 0 0 10px #7cfc00;
+    color: #b0fc00;
+    font-weight: normal;
+    font-family: 'Courier New', monospace;
+}
+
+.timer {
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #ffff00;
+    text-shadow: 0 0 10px #ffaa00;
+    background: #0a1a0a;
+    padding: 10px 20px;
+    border: 2px solid #ffaa00;
+    position: relative;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 3px;
+}
+
+/* Modal Styles - Vintage Terminal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 15, 0, 0.95);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: #0f1f0f;
+    border: 4px solid #2e8b57;
+    padding: 40px;
+    max-width: 600px;
+    width: 90%;
+    position: relative;
+    box-shadow: inset 0 0 50px #0a3a0a,
+                0 0 40px #7cfc00;
+}
+
+.modal-content::before {
+    content: '> NEW GAME INITIALIZATION <';
+    position: absolute;
+    top: -15px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0f1f0f;
+    padding: 5px 20px;
+    color: #7cfc00;
+    font-size: 14px;
+    letter-spacing: 3px;
+    border: 2px solid #2e8b57;
+    white-space: nowrap;
+    font-family: 'Courier New', monospace;
+}
+
+.modal-content h2 {
+    color: #7cfc00;
+    text-align: center;
+    margin-bottom: 30px;
+    font-size: 2em;
+    text-transform: uppercase;
+    letter-spacing: 5px;
+    text-shadow: 0 0 15px #7cfc00;
+    font-family: 'Courier New', monospace;
+    font-weight: normal;
+}
+
+.input-group {
+    margin-bottom: 25px;
+}
+
+.input-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #7cfc00;
+    font-size: 0.9em;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+}
+
+.input-group input {
+    width: 100%;
+    padding: 15px;
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    color: #7cfc00;
+    font-family: 'Courier New', monospace;
+    font-size: 16px;
+    box-shadow: inset 0 0 10px #1a3a1a;
+}
+
+.input-group input:focus {
+    outline: none;
+    border-color: #ffff00;
+    box-shadow: inset 0 0 20px #3a6a3a;
+}
+
+/* Country Type Selector */
+.country-type-selector {
+    margin: 25px 0;
+    padding: 20px;
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    position: relative;
+    box-shadow: inset 0 0 30px #0f2f0f;
+}
+
+.country-type-selector label {
+    display: block;
+    margin-bottom: 10px;
+    color: #7cfc00;
+    font-size: 0.9em;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+}
+
+.country-type-selector select {
+    width: 100%;
+    padding: 12px;
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    color: #7cfc00;
+    font-family: 'Courier New', monospace;
+    font-size: 16px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237cfc00' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 15px center;
+}
+
+.country-type-selector select option {
+    background: #0a1a0a;
+    color: #7cfc00;
+    padding: 10px;
+    font-family: 'Courier New', monospace;
+}
+
+.type-description {
+    margin-top: 15px;
+    padding: 12px;
+    border: 1px dashed #2e8b57;
+    background: #0f1f0f;
+    min-height: 50px;
+    font-size: 0.9em;
+    color: #adff2f;
+    font-family: 'Courier New', monospace;
+}
+
+.type-description span {
+    display: block;
+    animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.hidden {
+    display: none !important;
+}
+
+.flag-upload {
+    margin: 25px 0;
+}
+
+.flag-upload label {
+    display: block;
+    margin-bottom: 8px;
+    color: #7cfc00;
+    font-size: 0.9em;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+}
+
+.flag-upload input[type="file"] {
+    width: 100%;
+    padding: 12px;
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    color: #7cfc00;
+    font-family: 'Courier New', monospace;
+}
+
+.modal-content button {
+    width: 100%;
+    background: #0a1a0a;
+    border: 3px solid #2e8b57;
+    color: #7cfc00;
+    padding: 15px;
+    font-size: 18px;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    cursor: pointer;
+    transition: all 0.1s linear;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    box-shadow: inset 0 0 20px #0f2f0f;
+}
+
+.modal-content button:hover {
+    background: #1a3a1a;
+    border-color: #adff2f;
+    box-shadow: inset 0 0 30px #2e8b57;
+}
+
+/* Dashboard - Command Center */
+.dashboard {
+    background: #0f1f0f;
+    border: 4px solid #2e8b57;
+    padding: 30px;
+    box-shadow: inset 0 0 60px #0a2a0a,
+                0 0 30px #2e8b57;
+    position: relative;
+}
+
+.dashboard::before {
+    content: '> PRIMARY COMMAND CENTER <';
+    position: absolute;
+    top: -15px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0f1f0f;
+    padding: 5px 30px;
+    color: #7cfc00;
+    font-size: 16px;
+    letter-spacing: 3px;
+    border: 2px solid #2e8b57;
+    white-space: nowrap;
+    font-family: 'Courier New', monospace;
+}
+
+.country-info {
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: inset 0 0 30px #0a2a0a;
+}
+
+.country-info h2 {
+    color: #7cfc00;
+    font-size: 2em;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    text-shadow: 0 0 10px #7cfc00;
+    font-family: 'Courier New', monospace;
+    font-weight: normal;
+}
+
+.resources {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.resource {
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    padding: 12px;
+    text-align: center;
+    font-size: 1em;
+    position: relative;
+    font-family: 'Courier New', monospace;
+    box-shadow: inset 0 0 15px #0a2a0a;
+    color: #adff2f;
+}
+
+.resource::before {
+    content: '>';
+    position: absolute;
+    left: 5px;
+    color: #2e8b57;
+}
+
+.resource::after {
+    content: '<';
+    position: absolute;
+    right: 5px;
+    color: #2e8b57;
+}
+
+/* Action Buttons - Tactical */
+.actions-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.action-btn {
+    background: #0a1a0a;
+    border: 3px solid #2e8b57;
+    color: #7cfc00;
+    padding: 15px 10px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: all 0.1s linear;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    box-shadow: inset 0 0 20px #0a2a0a;
+    position: relative;
+}
+
+.action-btn::before {
+    content: '[';
+    position: absolute;
+    left: 5px;
+    color: #2e8b57;
+}
+
+.action-btn::after {
+    content: ']';
+    position: absolute;
+    right: 5px;
+    color: #2e8b57;
+}
+
+.action-btn:hover {
+    background: #1a3a1a;
+    border-color: #adff2f;
+    box-shadow: inset 0 0 30px #2e8b57;
+}
+
+.action-btn:disabled {
+    opacity: 0.3;
+    border-color: #2a4a2a;
+    cursor: not-allowed;
+}
+
+.attack-btn {
+    border-color: #ff4500;
+    color: #ff8c00;
+}
+
+.attack-btn::before,
+.attack-btn::after {
+    color: #ff4500;
+}
+
+.attack-btn:hover {
+    background: #2a1a0a;
+    border-color: #ff8c00;
+    box-shadow: inset 0 0 30px #ff4500;
+}
+
+/* Attack Panel */
+.attack-panel,
+.trade-panel {
+    background: #0a1a0a;
+    border: 2px solid #2e8b57;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: inset 0 0 30px #0a2a0a;
+}
+
+.attack-panel h3,
+.trade-panel h3 {
+    color: #7cfc00;
+    font-size: 1.2em;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-family: 'Courier New', monospace;
+    font-weight: normal;
+    border-bottom: 1px dashed #2e8b57;
+    padding-bottom: 8px;
+}
+
+.attack-panel select,
+.trade-panel select,
+.trade-panel input {
+    width: 100%;
+    padding: 12px;
+    margin: 8px 0;
+    background: #0f1f0f;
+    border: 2px solid #2e8b57;
+    color: #7cfc00;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    box-shadow: inset 0 0 15px #0a2a0a;
+}
+
+.attack-panel select option,
+.trade-panel select option {
+    background: #0a1a0a;
+    color: #7cfc00;
+}
+
+/* Game Map - Radar Style */
+.game-map {
+    background: #0a1a0a;
+    border: 3px solid #2e8b57;
+    padding: 20px;
+    margin-top: 20px;
+    box-shadow: inset 0 0 50px #0a2a0a;
+}
+
+.game-map h3 {
+    color: #7cfc00;
+    font-size: 1.3em;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 4px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    font-weight: normal;
+}
+
+.map-container {
+    min-height: 400px;
+    background: #0f1f0f;
+    border: 2px solid #2e8b57;
+    padding: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 15px;
+    position: relative;
+    box-shadow: inset 0 0 40px #1a3a1a;
+}
+
+/* Radar Sweep - Green */
+.map-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at 30% 30%, rgba(124, 252, 0, 0.15) 0%, transparent 60%);
+    animation: radarSweep 8s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes radarSweep {
+    0% { transform: rotate(0deg) scale(1); opacity: 0.5; }
+    50% { transform: rotate(180deg) scale(1.2); opacity: 0.8; }
+    100% { transform: rotate(360deg) scale(1); opacity: 0.5; }
+}
+
+/* Grid lines for radar */
+.map-container::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: 
+        linear-gradient(rgba(124, 252, 0, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(124, 252, 0, 0.1) 1px, transparent 1px);
+    background-size: 50px 50px;
+    pointer-events: none;
+}
+
+.map-country {
+    background: #0f1f0f;
+    border: 2px solid #2e8b57;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.1s linear;
+    position: relative;
+    box-shadow: inset 0 0 20px #0a2a0a;
+}
+
+.map-country::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 1px solid #7cfc00;
+    opacity: 0;
+    transition: opacity 0.1s;
+}
+
+.map-country:hover::before {
+    opacity: 1;
+}
+
+.map-country:hover {
+    border-color: #adff2f;
+    box-shadow: inset 0 0 30px #2e8b57;
+}
+
+.map-country.economic {
+    border-color: #228b22;
+}
+
+.map-country.wartime {
+    border-color: #dc143c;
+}
+
+.map-country h4 {
+    color: #7cfc00;
+    font-size: 1.1em;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+}
+
+.map-country p {
+    color: #adff2f;
+    font-size: 0.9em;
+    margin: 4px 0;
+    font-family: 'Courier New', monospace;
+}
+
+/* Trade Notifications - Military Intel */
+.trade-notifications {
+    background: #0f1f0f;
+    border: 3px solid #ffaa00;
+    padding: 20px;
+    margin-bottom: 20px;
+    position: relative;
+    box-shadow: inset 0 0 40px #3a2a0a;
+}
+
+.trade-notifications h3 {
+    color: #ffaa00;
+    font-size: 1.2em;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-family: 'Courier New', monospace;
+}
+
+.trade-proposal {
+    background: #0a1a0a;
+    border: 2px solid #ffaa00;
+    padding: 15px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    box-shadow: inset 0 0 20px #1a2a0a;
+}
+
+.trade-proposal::before {
+    content: '> INCOMING <';
+    position: absolute;
+    top: -10px;
+    right: 10px;
+    background: #0f1f0f;
+    padding: 2px 10px;
+    font-size: 10px;
+    color: #ffaa00;
+    border: 1px solid #ffaa00;
+    font-family: 'Courier New', monospace;
+}
+
+.accept-trade-btn,
+.reject-trade-btn {
+    padding: 8px 16px;
+    border: 2px solid;
+    background: transparent;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    transition: all 0.1s linear;
+}
+
+.accept-trade-btn {
+    border-color: #228b22;
+    color: #228b22;
+}
+
+.accept-trade-btn:hover {
+    background: #228b22;
+    color: #0a1a0a;
+}
+
+.reject-trade-btn {
+    border-color: #dc143c;
+    color: #dc143c;
+}
+
+.reject-trade-btn:hover {
+    background: #dc143c;
+    color: #0a1a0a;
+}
+
+/* My Trade Offers */
+.my-trade-offers {
+    background: #0a1a0a;
+    border: 3px solid #2e8b57;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.my-trade-offers h4 {
+    color: #7cfc00;
+    font-size: 1.1em;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    font-family: 'Courier New', monospace;
+}
+
+.my-trade-offer {
+    background: #0f1f0f;
+    border: 2px solid #2e8b57;
+    padding: 12px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.pending-badge {
+    background: #ffaa00;
+    color: #0a1a0a;
+    padding: 3px 8px;
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+}
+
+.trade-timer {
+    color: #ffaa00;
+    font-size: 0.8em;
+    margin-top: 5px;
+    font-family: 'Courier New', monospace;
+}
+
+.cancel-trade-btn {
+    background: transparent;
+    border: 2px solid #ff4500;
+    color: #ff4500;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    transition: all 0.1s linear;
+}
+
+.cancel-trade-btn:hover {
+    background: #ff4500;
+    color: #0a1a0a;
+}
+
+/* Attack Result Messages */
+#attackResult {
+    margin-top: 15px;
+    padding: 15px;
+    border: 2px solid;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+}
+
+.success {
+    background: #0a1a0a;
+    border-color: #228b22;
+    color: #228b22;
+}
+
+.failure {
+    background: #0a1a0a;
+    border-color: #dc143c;
+    color: #dc143c;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 12px;
+    background: #0a1a0a;
+}
+
+::-webkit-scrollbar-track {
+    border: 2px solid #2e8b57;
+    background: #0f1f0f;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #2e8b57;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #7cfc00;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .resources {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .actions-panel {
+        grid-template-columns: 1fr;
+    }
+    
+    header h1 {
+        font-size: 1.5em;
+    }
+    
+    .dashboard::before {
+        font-size: 12px;
+        padding: 5px 15px;
+    }
+}
