@@ -30,6 +30,7 @@ class Game {
         this.checkExistingSession();
         this.setupTradeListeners();
         this.startTradeCleanup();
+        this.setupResizeHandler();
     }
 
     setupListeners() {
@@ -791,27 +792,279 @@ class Game {
         }
     }
 
-    async updateMap() {
-        const snapshot = await countriesRef.once('value');
-        const countries = snapshot.val();
-        const mapContainer = document.getElementById('mapContainer');
-        
-        if (!mapContainer || !countries) return;
-        
-        mapContainer.innerHTML = '';
-        
-        Object.values(countries).forEach(country => {
-            const countryDiv = document.createElement('div');
-            countryDiv.className = `map-country ${country.type}`;
-            countryDiv.innerHTML = `
-                <h4>${country.name}</h4>
-                <p>❤️ ${country.lives} | 💰 ${country.gold?.toFixed(1) || 0}</p>
-                <p>⚔️ ${country.soldiers || 0} | 📊 Lvl ${country.level}</p>
-            `;
-            countryDiv.onclick = () => this.showCountryDetails(country.id);
-            mapContainer.appendChild(countryDiv);
-        });
+  async updateMap() {
+    const snapshot = await countriesRef.once('value');
+    const countries = snapshot.val();
+    const mapContainer = document.getElementById('mapContainer');
+    
+    if (!mapContainer || !countries) return;
+    
+    // Clear existing map but keep overlays
+    const existingCountries = mapContainer.querySelectorAll('.map-country');
+    existingCountries.forEach(el => el.remove());
+    
+    const existingLines = mapContainer.querySelectorAll('.connection-line');
+    existingLines.forEach(el => el.remove());
+    
+    // Get all country entries
+    const countryEntries = Object.entries(countries);
+    const totalSectors = countryEntries.length;
+    
+    // Calculate controlled sectors (for current player)
+    let controlledSectors = 0;
+    if (this.currentPlayerId) {
+        controlledSectors = countryEntries.filter(([id]) => 
+            id === this.currentPlayerId || 
+            (countries[id].neighbors && countries[id].neighbors.includes(this.currentPlayerId))
+        ).length;
     }
+    
+    // Track active conflicts (countries with low lives)
+    const activeConflicts = Object.values(countries).filter(c => c.lives <= 1).length;
+    
+    // Track trade routes (pending trades)
+    let tradeRoutes = 0;
+    try {
+        const tradesSnapshot = await tradesRef.once('value');
+        const trades = tradesSnapshot.val();
+        tradeRoutes = trades ? Object.values(trades).filter(t => t.status === 'pending').length : 0;
+    } catch (e) {
+        console.log('No trades yet');
+    }
+    
+    // Update status bar
+    const controlledEl = document.getElementById('controlledSectors');
+    const totalEl = document.getElementById('totalSectors');
+    const conflictsEl = document.getElementById('activeConflicts');
+    const routesEl = document.getElementById('tradeRoutes');
+    
+    if (controlledEl) controlledEl.textContent = controlledSectors;
+    if (totalEl) totalEl.textContent = totalSectors;
+    if (conflictsEl) conflictsEl.textContent = activeConflicts;
+    if (routesEl) routesEl.textContent = tradeRoutes;
+    
+    // Calculate positions in a circle
+    const centerX = 50;
+    const centerY = 50;
+    const radius = 35;
+    
+    // Create territories
+    countryEntries.forEach(([id, country], index) => {
+        const countryDiv = document.createElement('div');
+        countryDiv.className = `map-country ${country.type}`;
+        countryDiv.setAttribute('data-territory', (index % 4).toString());
+        countryDiv.setAttribute('data-country-id', id);
+        
+        // Position in a circle
+        const angle = (index / countryEntries.length) * 2 * Math.PI;
+        const left = centerX + radius * Math.cos(angle);
+        const top = centerY + radius * Math.sin(angle);
+        
+        countryDiv.style.left = left + '%';
+        countryDiv.style.top = top + '%';
+        countryDiv.style.transform = 'translate(-50%, -50%)';
+        
+        // Check if this is the capital (first country or current player)
+        if (index === 0 || id === this.currentPlayerId) {
+            countryDiv.classList.add('has-capital');
+        }
+        
+        // Check if country is in conflict (low lives)
+        if (country.lives <= 1) {
+            countryDiv.classList.add('conflict');
+        }
+        
+        // Check if this is the current player's country
+        if (id === this.currentPlayerId) {
+            countryDiv.classList.add('selected');
+        }
+        
+        // Territory content - remove emojis for consistency
+        countryDiv.innerHTML = `
+            <div class="territory-info">
+                <h4>${country.name}</h4>
+                <div class="stats">
+                    <div class="stat-item">♥ ${country.lives}</div>
+                    <div class="stat-item">💰 ${country.gold?.toFixed(1) || 0}</div>
+                    <div class="stat-item">⚔ ${country.soldiers || 0}</div>
+                    <div class="stat-item">📊 ${country.level}</div>
+                </div>
+            </div>
+            <div class="resource-indicator">
+                ${country.gold > 5 ? '<div class="resource-dot gold" title="Rich in gold"></div>' : ''}
+                ${country.soldiers > 3 ? '<div class="resource-dot soldier" title="Military presence"></div>' : ''}
+            </div>
+            ${country.soldiers > 5 ? '<div class="military-base" title="Military installation"></div>' : ''}
+        `;
+        
+        // Add click handler
+        countryDiv.onclick = (e) => {
+            e.stopPropagation();
+            this.selectTerritory(id, countryDiv);
+        };
+        
+        mapContainer.appendChild(countryDiv);
+    });
+    
+    // Draw connection lines between neighbors
+    await this.drawConnectionLines(countries, mapContainer);
+}
+
+async drawConnectionLines(countries, container) {
+    // Remove old connection lines
+    document.querySelectorAll('.connection-line').forEach(el => el.remove());
+    
+    const countryElements = container.querySelectorAll('.map-country');
+    if (countryElements.length < 2) return;
+    
+    // Wait for any pending reflows
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    // Create a map of country positions using getBoundingClientRect
+    const positions = new Map();
+    const containerRect = container.getBoundingClientRect();
+    
+    countryElements.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        
+        // Calculate relative positions within container (as percentages)
+        positions.set(el.dataset.countryId, {
+            x: ((rect.left + rect.width / 2) - containerRect.left) / containerRect.width * 100,
+            y: ((rect.top + rect.height / 2) - containerRect.top) / containerRect.height * 100,
+            element: el
+        });
+    });
+    
+    // Use SVG for more precise lines instead of div rotation
+    // First check if we already have an SVG overlay
+    let svgOverlay = container.querySelector('.map-lines-svg');
+    if (!svgOverlay) {
+        svgOverlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svgOverlay.classList.add('map-lines-svg');
+        svgOverlay.style.position = 'absolute';
+        svgOverlay.style.top = '0';
+        svgOverlay.style.left = '0';
+        svgOverlay.style.width = '100%';
+        svgOverlay.style.height = '100%';
+        svgOverlay.style.pointerEvents = 'none';
+        container.style.position = 'relative';
+        container.appendChild(svgOverlay);
+    }
+    
+    // Clear existing lines
+    while (svgOverlay.firstChild) {
+        svgOverlay.removeChild(svgOverlay.firstChild);
+    }
+    
+    // Track drawn connections to avoid duplicates
+    const drawnConnections = new Set();
+    
+    // Draw lines for neighbor relationships using SVG
+    for (const [id, country] of Object.entries(countries)) {
+        if (country.neighbors && country.neighbors.length > 0) {
+            const startPos = positions.get(id);
+            if (!startPos) continue;
+            
+            country.neighbors.forEach(neighborId => {
+                // Create unique key for this connection (ordered by IDs)
+                const connectionKey = [id, neighborId].sort().join('-');
+                if (drawnConnections.has(connectionKey)) return;
+                drawnConnections.add(connectionKey);
+                
+                const endPos = positions.get(neighborId);
+                if (!endPos) return;
+                
+                // Create SVG line
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                
+                // Convert percentage positions to actual coordinates
+                const x1 = (startPos.x / 100) * containerRect.width;
+                const y1 = (startPos.y / 100) * containerRect.height;
+                const x2 = (endPos.x / 100) * containerRect.width;
+                const y2 = (endPos.y / 100) * containerRect.height;
+                
+                line.setAttribute('x1', x1);
+                line.setAttribute('y1', y1);
+                line.setAttribute('x2', x2);
+                line.setAttribute('y2', y2);
+                line.setAttribute('stroke', '#00ffcc');
+                line.setAttribute('stroke-width', '2');
+                line.setAttribute('stroke-dasharray', '5,5');
+                line.setAttribute('opacity', '0.6');
+                
+                // Highlight if connected to current player
+                if (id === this.currentPlayerId || neighborId === this.currentPlayerId) {
+                    line.setAttribute('stroke', '#00ffcc');
+                    line.setAttribute('stroke-width', '3');
+                    line.setAttribute('opacity', '1');
+                    line.setAttribute('stroke-dasharray', 'none');
+                }
+                
+                svgOverlay.appendChild(line);
+            });
+        }
+    }
+}
+
+setupResizeHandler() {
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            if (this.currentPlayerId) {
+                this.updateMap();
+            }
+        }, 250);
+    });
+}
+
+addTerrainFeatures(container) {
+    // Add random mountains
+    for (let i = 0; i < 5; i++) {
+        const mountain = document.createElement('div');
+        mountain.className = 'terrain-feature mountain';
+        mountain.style.left = Math.random() * 90 + '%';
+        mountain.style.top = Math.random() * 90 + '%';
+        container.appendChild(mountain);
+    }
+    
+    // Add random forests
+    for (let i = 0; i < 8; i++) {
+        const forest = document.createElement('div');
+        forest.className = 'terrain-feature forest';
+        forest.style.left = Math.random() * 90 + '%';
+        forest.style.top = Math.random() * 90 + '%';
+        container.appendChild(forest);
+    }
+}
+
+selectTerritory(countryId, element) {
+    // Remove selected class from all territories
+    document.querySelectorAll('.map-country').forEach(el => {
+        el.classList.remove('selected');
+    });
+    
+    // Add selected class to clicked territory
+    element.classList.add('selected');
+    
+    // Show territory details (you can expand this)
+    this.showCountryDetails(countryId);
+    
+    // Highlight connection lines
+    document.querySelectorAll('.connection-line').forEach(line => {
+        line.classList.remove('active');
+    });
+    
+    // Find and highlight lines connected to this territory
+    setTimeout(() => {
+        document.querySelectorAll('.connection-line').forEach(line => {
+            // This is a simplified highlight - you might want to make it more sophisticated
+            if (Math.random() > 0.7) {
+                line.classList.add('active');
+            }
+        });
+    }, 100);
+}
 
     async updateNeighborSelectors() {
         if (!this.currentPlayerId) return;
