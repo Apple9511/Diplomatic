@@ -6,13 +6,14 @@ class Game {
         this.currentPlayerId = null;
         this.gameInterval = null;
         this.tradeListeners = [];
+        this.gameActive = true;
+        this.winnerDeclared = false;
         
         // Check if database is available
         if (typeof database !== 'undefined' && database) {
             this.initializeGame();
         } else {
             console.error("Database not initialized");
-            // Retry after a short delay
             setTimeout(() => {
                 if (typeof database !== 'undefined' && database) {
                     this.initializeGame();
@@ -31,6 +32,26 @@ class Game {
         this.setupTradeListeners();
         this.startTradeCleanup();
         this.setupResizeHandler();
+        this.setupGameOverListener();
+    }
+
+    setupGameOverListener() {
+        if (!countriesRef) return;
+        
+        countriesRef.on('child_removed', async (snapshot) => {
+            if (snapshot.key === this.currentPlayerId) {
+                await this.handleDefeat('Your country has been destroyed!');
+            }
+        });
+        
+        countriesRef.on('child_changed', async (snapshot) => {
+            if (snapshot.key === this.currentPlayerId && this.gameActive) {
+                const country = snapshot.val();
+                if (country && country.lives <= 0) {
+                    await this.handleDefeat('Your country has been conquered!');
+                }
+            }
+        });
     }
 
     setupListeners() {
@@ -39,7 +60,6 @@ class Game {
             return;
         }
         
-        // Listen for game state changes
         gameStateRef.on('value', (snapshot) => {
             const gameState = snapshot.val();
             if (gameState) {
@@ -47,24 +67,29 @@ class Game {
             }
         });
 
-        // Listen for country updates
         countriesRef.on('child_changed', (snapshot) => {
             const updatedCountry = snapshot.val();
-            if (snapshot.key === this.currentPlayerId) {
+            if (snapshot.key === this.currentPlayerId && this.gameActive) {
                 this.updatePlayerUI(updatedCountry);
+                if (updatedCountry.lives <= 0) {
+                    this.handleDefeat('Your country has been destroyed!');
+                }
             }
             this.updateNeighborSelectors();
             this.updateMap();
+            this.checkWinCondition();
         });
 
         countriesRef.on('child_added', () => {
             this.updateNeighborSelectors();
             this.updateMap();
+            this.checkWinCondition();
         });
 
         countriesRef.on('child_removed', () => {
             this.updateNeighborSelectors();
             this.updateMap();
+            this.checkWinCondition();
         });
     }
 
@@ -74,9 +99,8 @@ class Game {
             return;
         }
         
-        // Listen for new trades sent to current player
         tradesRef.on('child_added', (snapshot) => {
-            if (!this.currentPlayerId) return;
+            if (!this.currentPlayerId || !this.gameActive) return;
             const trade = snapshot.val();
             if (trade.toId === this.currentPlayerId && trade.status === 'pending') {
                 this.showTradeNotification(trade);
@@ -86,9 +110,8 @@ class Game {
             }
         });
 
-        // Listen for trade status changes
         tradesRef.on('child_changed', (snapshot) => {
-            if (!this.currentPlayerId) return;
+            if (!this.currentPlayerId || !this.gameActive) return;
             const trade = snapshot.val();
             if (trade.toId === this.currentPlayerId || trade.fromId === this.currentPlayerId) {
                 this.handleTradeUpdate(trade);
@@ -96,9 +119,8 @@ class Game {
             }
         });
 
-        // Listen for trade removals
         tradesRef.on('child_removed', (snapshot) => {
-            if (!this.currentPlayerId) return;
+            if (!this.currentPlayerId || !this.gameActive) return;
             this.updateMyTrades();
         });
     }
@@ -119,25 +141,24 @@ class Game {
                 level: 1,
                 upgradePoints: 0,
                 neighbors: [],
+                ownerId: countryId,
+                isAlive: true,
                 createdAt: firebase.database.ServerValue.TIMESTAMP,
                 lastDailyUpdate: firebase.database.ServerValue.TIMESTAMP
             };
 
             await newCountryRef.set(country);
             
-            // Set as current player
             this.currentPlayerId = countryId;
             this.currentPlayer = country;
+            this.gameActive = true;
             localStorage.setItem('playerId', countryId);
             
-            // Hide creation modal and show dashboard
             document.getElementById('creationModal').classList.add('hidden');
             document.getElementById('playerDashboard').classList.remove('hidden');
             
-            // Update neighbors based on existing countries
+            this.hideGameOverScreen();
             await this.updateNeighbors(countryId);
-            
-            // Force update the neighbor selectors
             await this.updateNeighborSelectors();
             
             return countryId;
@@ -154,16 +175,16 @@ class Game {
         
         if (countryIds.length > 1) {
             const otherCountries = countryIds.filter(id => id !== newCountryId);
+            const aliveCountries = otherCountries.filter(id => countries[id] && countries[id].isAlive !== false);
+            const neighbors = aliveCountries.slice(0, Math.min(3, aliveCountries.length));
             
-            // For simplicity, each country is neighbor with up to 3 closest countries
-            const neighbors = otherCountries.slice(0, Math.min(3, otherCountries.length));
-            
-            // Update new country's neighbors
             await countriesRef.child(newCountryId).child('neighbors').set(neighbors);
             
-            // Add new country as neighbor to others
             for (const countryId of otherCountries) {
-                const countryNeighbors = (countries[countryId].neighbors || []);
+                const country = countries[countryId];
+                if (!country || country.isAlive === false) continue;
+                
+                const countryNeighbors = (country.neighbors || []);
                 if (!countryNeighbors.includes(newCountryId) && countryNeighbors.length < 3) {
                     countryNeighbors.push(newCountryId);
                     await countriesRef.child(countryId).child('neighbors').set(countryNeighbors);
@@ -174,19 +195,21 @@ class Game {
 
     startDailyTimer() {
         this.gameInterval = setInterval(async () => {
-            await this.checkDailyUpdate();
+            if (this.gameActive) {
+                await this.checkDailyUpdate();
+            }
         }, 60000);
         
         setInterval(() => this.updateCountdown(), 1000);
     }
 
     async checkDailyUpdate() {
-        if (!this.currentPlayerId) return;
+        if (!this.currentPlayerId || !this.gameActive) return;
         
         const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
         const country = snapshot.val();
         
-        if (!country) return;
+        if (!country || country.isAlive === false) return;
         
         const now = Date.now();
         const lastUpdate = country.lastDailyUpdate || now;
@@ -219,17 +242,22 @@ class Game {
         }
         
         updates.gold = (country.gold || 0) + goldEarned;
-        updates.actions = actionsEarned;
+        updates.actions = (country.actions || 0) + actionsEarned;
         updates.lastDailyUpdate = firebase.database.ServerValue.TIMESTAMP;
         
         await countriesRef.child(countryId).update(updates);
     }
 
     async buySoldier() {
-        if (!this.currentPlayerId) return;
+        if (!this.currentPlayerId || !this.gameActive) return;
         
         const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
         const country = snapshot.val();
+        
+        if (!country || country.isAlive === false) {
+            this.showMessage('Your country is no longer active!', 'failure');
+            return;
+        }
         
         let soldierCost = 2;
         
@@ -255,13 +283,16 @@ class Game {
     }
 
     async fortify(targetId = null) {
-        if (!this.currentPlayerId) return;
+        if (!this.currentPlayerId || !this.gameActive) return;
         
         const target = targetId || this.currentPlayerId;
         const snapshot = await countriesRef.child(target).once('value');
         const country = snapshot.val();
         
-        if (!country) return;
+        if (!country || (target !== this.currentPlayerId && country.isAlive === false)) {
+            this.showMessage('Target country is not active!', 'failure');
+            return;
+        }
         
         if (target !== this.currentPlayerId) {
             const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
@@ -309,7 +340,7 @@ class Game {
     }
 
     async attack(neighborId) {
-        if (!this.currentPlayerId || !neighborId) return;
+        if (!this.currentPlayerId || !this.gameActive) return;
         
         const attackerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
         const attacker = attackerSnapshot.val();
@@ -318,6 +349,11 @@ class Game {
         
         if (!defender) {
             this.showMessage('Target country not found!', 'failure');
+            return;
+        }
+        
+        if (defender.isAlive === false) {
+            this.showMessage('Target country is already defeated!', 'failure');
             return;
         }
         
@@ -359,14 +395,15 @@ class Game {
             };
             
             if (defender.lives - 1 <= 0) {
-                defenderUpdates.lives = GAME_CONFIG.STARTING_LIVES;
-                defenderUpdates.gold = 0;
-                defenderUpdates.soldiers = 0;
+                defenderUpdates.isAlive = false;
+                defenderUpdates.lives = 0;
                 
-                updates.name = defender.name;
-                updates.type = defender.type;
+                this.showMessage(`You defeated ${defender.name}!`, 'success');
                 
-                this.showMessage(`You conquered ${defender.name}!`, 'success');
+                updates.gold = (attacker.gold || 0) + 5;
+                this.showMessage(`+5 Gold reward for victory!`, 'success');
+                
+                await this.checkPlayerElimination(neighborId);
             } else {
                 updates.gold = (attacker.gold || 0) + 1;
                 this.showMessage('Attack successful! Stole 1 gold!', 'success');
@@ -378,13 +415,224 @@ class Game {
         }
         
         await countriesRef.child(this.currentPlayerId).update(updates);
+        await this.checkWinCondition();
+    }
+
+    async checkPlayerElimination(defeatedCountryId) {
+    const defeatedSnapshot = await countriesRef.child(defeatedCountryId).once('value');
+    const defeatedCountry = defeatedSnapshot.val();
+    
+    if (!defeatedCountry) return;
+    
+    const allCountries = await countriesRef.once('value');
+    const countries = allCountries.val();
+    
+    const totalCountriesEver = Object.keys(countries).length;
+    
+    // Don't eliminate if this is the only country in the game
+    if (totalCountriesEver <= 1) {
+        return;
+    }
+    
+    const playerCountries = Object.entries(countries).filter(([id, country]) => 
+        country.ownerId === defeatedCountry.ownerId && country.isAlive !== false && id !== defeatedCountryId
+    );
+    
+    if (playerCountries.length === 0) {
+        const eliminatedPlayerId = defeatedCountry.ownerId;
+        this.showMessage(`Player ${defeatedCountry.name} has been ELIMINATED from the game!`, 'failure');
+        
+        if (eliminatedPlayerId === this.currentPlayerId) {
+            await this.handleDefeat('Your last country has been conquered! You are eliminated!');
+        }
+        
+        // Now check win condition after elimination
+        await this.checkWinCondition();
+    }
+}
+
+async checkWinCondition() {
+    if (this.winnerDeclared) return;
+    
+    const snapshot = await countriesRef.once('value');
+    const countries = snapshot.val();
+    
+    if (!countries) return;
+    
+    // Get all alive countries
+    const aliveCountries = Object.entries(countries).filter(([id, country]) => 
+        country.isAlive !== false
+    );
+    
+    // Don't check win condition if there's only 1 total country ever created
+    // This prevents instant victory at game start
+    const totalCountriesEver = Object.keys(countries).length;
+    if (totalCountriesEver < 2) {
+        return; // Game hasn't really started yet
+    }
+    
+    // Get unique owners of alive countries
+    const uniqueOwners = new Set();
+    aliveCountries.forEach(([id, country]) => {
+        uniqueOwners.add(country.ownerId || id);
+    });
+    
+    // Only declare victory if there's exactly 1 owner AND we've had at least 2 players total
+    if (uniqueOwners.size === 1 && aliveCountries.length > 0 && totalCountriesEver >= 2) {
+        // Make sure this isn't just the first player alone
+        if (aliveCountries.length === totalCountriesEver && totalCountriesEver === 1) {
+            return; // Still just one player, no victory
+        }
+        
+        const winnerId = Array.from(uniqueOwners)[0];
+        const winnerCountry = aliveCountries.find(([id, country]) => 
+            (country.ownerId || id) === winnerId
+        )[1];
+        
+        this.winnerDeclared = true;
+        this.gameActive = false;
+        
+        this.showVictory(winnerCountry.name);
+    }
+}
+
+    async handleDefeat(reason) {
+        if (!this.gameActive) return;
+        
+        this.gameActive = false;
+        this.winnerDeclared = true;
+        
+        if (this.currentPlayerId) {
+            await countriesRef.child(this.currentPlayerId).update({
+                isAlive: false,
+                lives: 0
+            });
+        }
+        
+        this.showDefeatScreen(reason);
+        this.disableGameControls();
+    }
+
+    showVictory(winnerName) {
+        const victoryDiv = document.createElement('div');
+        victoryDiv.className = 'game-overlay victory';
+        victoryDiv.innerHTML = `
+            <div class="game-over-content">
+                <div class="victory-icon">🏆</div>
+                <h1>VICTORY!</h1>
+                <h2>${winnerName} has conquered the world!</h2>
+                <p>All other nations have fallen before your might.</p>
+                <div class="game-stats">
+                    <h3>Final Statistics</h3>
+                    <div id="finalStats"></div>
+                </div>
+                <button onclick="window.location.reload()">PLAY AGAIN</button>
+                <button onclick="window.game.showMainMenu()">MAIN MENU</button>
+            </div>
+        `;
+        
+        document.body.appendChild(victoryDiv);
+        this.loadFinalStats();
+    }
+
+    showDefeatScreen(reason) {
+        const defeatDiv = document.createElement('div');
+        defeatDiv.className = 'game-overlay defeat';
+        defeatDiv.innerHTML = `
+            <div class="game-over-content">
+                <div class="defeat-icon">💀</div>
+                <h1>DEFEAT</h1>
+                <h2>${reason}</h2>
+                <p>Your nation has fallen. The dream of conquest ends here.</p>
+                <div class="game-stats">
+                    <h3>Your Legacy</h3>
+                    <div id="finalStats"></div>
+                </div>
+                <button onclick="window.location.reload()">PLAY AGAIN</button>
+                <button onclick="window.game.showMainMenu()">MAIN MENU</button>
+            </div>
+        `;
+        
+        document.body.appendChild(defeatDiv);
+        this.loadFinalStats(true);
+    }
+
+    async loadFinalStats(forPlayer = false) {
+        const statsDiv = document.getElementById('finalStats');
+        if (!statsDiv) return;
+        
+        const snapshot = await countriesRef.once('value');
+        const countries = snapshot.val();
+        
+        if (!countries) return;
+        
+        if (forPlayer && this.currentPlayerId) {
+            const playerCountry = countries[this.currentPlayerId];
+            if (playerCountry) {
+                statsDiv.innerHTML = `
+                    <p>🏰 Country: ${playerCountry.name}</p>
+                    <p>⭐ Type: ${playerCountry.type}</p>
+                    <p>📊 Final Level: ${playerCountry.level}</p>
+                    <p>💰 Gold Collected: ${playerCountry.gold?.toFixed(1) || 0}</p>
+                    <p>⚔️ Soldiers Trained: ${playerCountry.soldiers || 0}</p>
+                    <p>🎯 Actions Used: ${GAME_CONFIG.BASE_ACTIONS_PER_DAY - (playerCountry.actions || 0)}</p>
+                `;
+            }
+        } else {
+            const aliveCountries = Object.values(countries).filter(c => c.isAlive !== false);
+            const totalCountries = Object.keys(countries).length;
+            const eliminated = totalCountries - aliveCountries.length;
+            
+            statsDiv.innerHTML = `
+                <p>🌍 Total Nations: ${totalCountries}</p>
+                <p>💀 Nations Eliminated: ${eliminated}</p>
+                <p>⭐ Surviving Nations: ${aliveCountries.length}</p>
+                <p>🏆 Winner takes all!</p>
+            `;
+        }
+    }
+
+    disableGameControls() {
+        const buttons = ['buySoldier', 'fortify', 'healNeighbor', 'upgrade', 'attackBtn', 'proposeTrade'];
+        buttons.forEach(btnId => {
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            }
+        });
+        
+        const selects = ['neighborSelect', 'tradePartner'];
+        selects.forEach(selectId => {
+            const select = document.getElementById(selectId);
+            if (select) {
+                select.disabled = true;
+                select.style.opacity = '0.5';
+            }
+        });
+    }
+
+    hideGameOverScreen() {
+        const overlays = document.querySelectorAll('.game-overlay');
+        overlays.forEach(overlay => overlay.remove());
+    }
+
+    showMainMenu() {
+        localStorage.removeItem('playerId');
+        window.location.reload();
     }
 
     async upgrade() {
-        if (!this.currentPlayerId) return;
+        if (!this.currentPlayerId || !this.gameActive) return;
         
         const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
         const country = snapshot.val();
+        
+        if (!country || country.isAlive === false) {
+            this.showMessage('Your country is no longer active!', 'failure');
+            return;
+        }
         
         if (country.actions < 1) {
             this.showMessage('Not enough actions!', 'failure');
@@ -415,14 +663,19 @@ class Game {
     }
 
     async proposeTrade(tradeData) {
-        if (!this.currentPlayerId) {
-            this.showMessage('You must create a country first!', 'failure');
+        if (!this.currentPlayerId || !this.gameActive) {
+            this.showMessage('Game is not active!', 'failure');
             return;
         }
         
         try {
             const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
             const player = snapshot.val();
+            
+            if (!player || player.isAlive === false) {
+                this.showMessage('Your country is not active!', 'failure');
+                return;
+            }
             
             if (player.gold < tradeData.gold) {
                 this.showMessage(`You don't have ${tradeData.gold} gold!`, 'failure');
@@ -485,6 +738,11 @@ class Game {
     }
 
     async acceptTrade(tradeId) {
+        if (!this.gameActive) {
+            this.showMessage('Game is not active!', 'failure');
+            return;
+        }
+        
         try {
             const tradeSnapshot = await tradesRef.child(tradeId).once('value');
             const trade = tradeSnapshot.val();
@@ -501,6 +759,11 @@ class Game {
             
             const receiverSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
             const receiver = receiverSnapshot.val();
+            
+            if (!receiver || receiver.isAlive === false) {
+                this.showMessage('Your country is not active!', 'failure');
+                return;
+            }
             
             const receiverUpdates = {
                 gold: (receiver.gold || 0) + trade.gold,
@@ -525,6 +788,8 @@ class Game {
     }
 
     async rejectTrade(tradeId) {
+        if (!this.gameActive) return;
+        
         try {
             const tradeSnapshot = await tradesRef.child(tradeId).once('value');
             const trade = tradeSnapshot.val();
@@ -533,6 +798,8 @@ class Game {
             
             const senderSnapshot = await countriesRef.child(trade.fromId).once('value');
             const sender = senderSnapshot.val();
+            
+            if (!sender) return;
             
             const senderUpdates = {
                 gold: (sender.gold || 0) + trade.gold,
@@ -560,6 +827,8 @@ class Game {
     }
 
     async cancelTrade(tradeId) {
+        if (!this.gameActive) return;
+        
         try {
             const tradeSnapshot = await tradesRef.child(tradeId).once('value');
             const trade = tradeSnapshot.val();
@@ -569,6 +838,8 @@ class Game {
             
             const senderSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
             const sender = senderSnapshot.val();
+            
+            if (!sender) return;
             
             const senderUpdates = {
                 gold: (sender.gold || 0) + trade.gold,
@@ -727,18 +998,20 @@ class Game {
                     const senderSnapshot = await countriesRef.child(trade.fromId).once('value');
                     const sender = senderSnapshot.val();
                     
-                    const senderUpdates = {
-                        gold: (sender.gold || 0) + trade.gold,
-                        soldiers: (sender.soldiers || 0) + trade.soldiers
-                    };
-                    
-                    if (trade.actions > 0) {
-                        senderUpdates.actions = (sender.actions || 0) + trade.actions;
+                    if (sender) {
+                        const senderUpdates = {
+                            gold: (sender.gold || 0) + trade.gold,
+                            soldiers: (sender.soldiers || 0) + trade.soldiers
+                        };
+                        
+                        if (trade.actions > 0) {
+                            senderUpdates.actions = (sender.actions || 0) + trade.actions;
+                        }
+                        
+                        await countriesRef.child(trade.fromId).update(senderUpdates);
                     }
                     
-                    await countriesRef.child(trade.fromId).update(senderUpdates);
                     await tradesRef.child(id).update({ status: 'expired' });
-                    
                     this.removeTradeNotification(id);
                 }
             }
@@ -750,12 +1023,19 @@ class Game {
         if (savedPlayerId) {
             countriesRef.child(savedPlayerId).once('value', (snapshot) => {
                 if (snapshot.exists()) {
-                    this.currentPlayerId = savedPlayerId;
-                    this.currentPlayer = snapshot.val();
-                    document.getElementById('creationModal').classList.add('hidden');
-                    document.getElementById('playerDashboard').classList.remove('hidden');
-                    this.updatePlayerUI(this.currentPlayer);
-                    this.updateNeighborSelectors();
+                    const country = snapshot.val();
+                    if (country.isAlive !== false) {
+                        this.currentPlayerId = savedPlayerId;
+                        this.currentPlayer = country;
+                        this.gameActive = true;
+                        document.getElementById('creationModal').classList.add('hidden');
+                        document.getElementById('playerDashboard').classList.remove('hidden');
+                        this.updatePlayerUI(this.currentPlayer);
+                        this.updateNeighborSelectors();
+                    } else {
+                        localStorage.removeItem('playerId');
+                        this.showDefeatScreen('Your previous country was defeated. Start a new game!');
+                    }
                 } else {
                     localStorage.removeItem('playerId');
                 }
@@ -791,279 +1071,245 @@ class Game {
         }
     }
 
-  async updateMap() {
-    const snapshot = await countriesRef.once('value');
-    const countries = snapshot.val();
-    const mapContainer = document.getElementById('mapContainer');
-    
-    if (!mapContainer || !countries) return;
-    
-    // Clear existing map but keep overlays
-    const existingCountries = mapContainer.querySelectorAll('.map-country');
-    existingCountries.forEach(el => el.remove());
-    
-    const existingLines = mapContainer.querySelectorAll('.connection-line');
-    existingLines.forEach(el => el.remove());
-    
-    // Get all country entries
-    const countryEntries = Object.entries(countries);
-    const totalSectors = countryEntries.length;
-    
-    // Calculate controlled sectors (for current player)
-    let controlledSectors = 0;
-    if (this.currentPlayerId) {
-        controlledSectors = countryEntries.filter(([id]) => 
-            id === this.currentPlayerId || 
-            (countries[id].neighbors && countries[id].neighbors.includes(this.currentPlayerId))
-        ).length;
-    }
-    
-    // Track active conflicts (countries with low lives)
-    const activeConflicts = Object.values(countries).filter(c => c.lives <= 1).length;
-    
-    // Track trade routes (pending trades)
-    let tradeRoutes = 0;
-    try {
-        const tradesSnapshot = await tradesRef.once('value');
-        const trades = tradesSnapshot.val();
-        tradeRoutes = trades ? Object.values(trades).filter(t => t.status === 'pending').length : 0;
-    } catch (e) {
-        console.log('No trades yet');
-    }
-    
-    // Update status bar
-    const controlledEl = document.getElementById('controlledSectors');
-    const totalEl = document.getElementById('totalSectors');
-    const conflictsEl = document.getElementById('activeConflicts');
-    const routesEl = document.getElementById('tradeRoutes');
-    
-    if (controlledEl) controlledEl.textContent = controlledSectors;
-    if (totalEl) totalEl.textContent = totalSectors;
-    if (conflictsEl) conflictsEl.textContent = activeConflicts;
-    if (routesEl) routesEl.textContent = tradeRoutes;
-    
-    // Calculate positions in a circle
-    const centerX = 50;
-    const centerY = 50;
-    const radius = 35;
-    
-    // Create territories
-    countryEntries.forEach(([id, country], index) => {
-        const countryDiv = document.createElement('div');
-        countryDiv.className = `map-country ${country.type}`;
-        countryDiv.setAttribute('data-territory', (index % 4).toString());
-        countryDiv.setAttribute('data-country-id', id);
+    async updateMap() {
+        const snapshot = await countriesRef.once('value');
+        const countries = snapshot.val();
+        const mapContainer = document.getElementById('mapContainer');
         
-        // Position in a circle
-        const angle = (index / countryEntries.length) * 2 * Math.PI;
-        const left = centerX + radius * Math.cos(angle);
-        const top = centerY + radius * Math.sin(angle);
+        if (!mapContainer || !countries) return;
         
-        countryDiv.style.left = left + '%';
-        countryDiv.style.top = top + '%';
-        countryDiv.style.transform = 'translate(-50%, -50%)';
+        const existingCountries = mapContainer.querySelectorAll('.map-country');
+        existingCountries.forEach(el => el.remove());
         
-        // Check if this is the capital (first country or current player)
-        if (index === 0 || id === this.currentPlayerId) {
-            countryDiv.classList.add('has-capital');
+        const existingLines = mapContainer.querySelectorAll('.connection-line');
+        existingLines.forEach(el => el.remove());
+        
+        const countryEntries = Object.entries(countries).filter(([id, country]) => country.isAlive !== false);
+        const totalSectors = countryEntries.length;
+        
+        let controlledSectors = 0;
+        if (this.currentPlayerId) {
+            controlledSectors = countryEntries.filter(([id]) => 
+                id === this.currentPlayerId || 
+                (countries[id].neighbors && countries[id].neighbors.includes(this.currentPlayerId))
+            ).length;
         }
         
-        // Check if country is in conflict (low lives)
-        if (country.lives <= 1) {
-            countryDiv.classList.add('conflict');
+        const activeConflicts = Object.values(countries).filter(c => c.isAlive !== false && c.lives <= 1).length;
+        
+        let tradeRoutes = 0;
+        try {
+            const tradesSnapshot = await tradesRef.once('value');
+            const trades = tradesSnapshot.val();
+            tradeRoutes = trades ? Object.values(trades).filter(t => t.status === 'pending').length : 0;
+        } catch (e) {
+            console.log('No trades yet');
         }
         
-        // Check if this is the current player's country
-        if (id === this.currentPlayerId) {
-            countryDiv.classList.add('selected');
-        }
+        const controlledEl = document.getElementById('controlledSectors');
+        const totalEl = document.getElementById('totalSectors');
+        const conflictsEl = document.getElementById('activeConflicts');
+        const routesEl = document.getElementById('tradeRoutes');
         
-        // Territory content - remove emojis for consistency
-        countryDiv.innerHTML = `
-            <div class="territory-info">
-                <h4>${country.name}</h4>
-                <div class="stats">
-                    <div class="stat-item">♥ ${country.lives}</div>
-                    <div class="stat-item">💰 ${country.gold?.toFixed(1) || 0}</div>
-                    <div class="stat-item">⚔ ${country.soldiers || 0}</div>
-                    <div class="stat-item">📊 ${country.level}</div>
-                </div>
-            </div>
-            <div class="resource-indicator">
-                ${country.gold > 5 ? '<div class="resource-dot gold" title="Rich in gold"></div>' : ''}
-                ${country.soldiers > 3 ? '<div class="resource-dot soldier" title="Military presence"></div>' : ''}
-            </div>
-            ${country.soldiers > 5 ? '<div class="military-base" title="Military installation"></div>' : ''}
-        `;
+        if (controlledEl) controlledEl.textContent = controlledSectors;
+        if (totalEl) totalEl.textContent = totalSectors;
+        if (conflictsEl) conflictsEl.textContent = activeConflicts;
+        if (routesEl) routesEl.textContent = tradeRoutes;
         
-        // Add click handler
-        countryDiv.onclick = (e) => {
-            e.stopPropagation();
-            this.selectTerritory(id, countryDiv);
-        };
+        const centerX = 50;
+        const centerY = 50;
+        const radius = 35;
         
-        mapContainer.appendChild(countryDiv);
-    });
-    
-    // Draw connection lines between neighbors
-    await this.drawConnectionLines(countries, mapContainer);
-}
-
-async drawConnectionLines(countries, container) {
-    // Remove old connection lines
-    document.querySelectorAll('.connection-line').forEach(el => el.remove());
-    
-    const countryElements = container.querySelectorAll('.map-country');
-    if (countryElements.length < 2) return;
-    
-    // Wait for any pending reflows
-    await new Promise(resolve => setTimeout(resolve, 50));
-    
-    // Create a map of country positions using getBoundingClientRect
-    const positions = new Map();
-    const containerRect = container.getBoundingClientRect();
-    
-    countryElements.forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        
-        // Calculate relative positions within container (as percentages)
-        positions.set(el.dataset.countryId, {
-            x: ((rect.left + rect.width / 2) - containerRect.left) / containerRect.width * 100,
-            y: ((rect.top + rect.height / 2) - containerRect.top) / containerRect.height * 100,
-            element: el
-        });
-    });
-    
-    // Use SVG for more precise lines instead of div rotation
-    // First check if we already have an SVG overlay
-    let svgOverlay = container.querySelector('.map-lines-svg');
-    if (!svgOverlay) {
-        svgOverlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svgOverlay.classList.add('map-lines-svg');
-        svgOverlay.style.position = 'absolute';
-        svgOverlay.style.top = '0';
-        svgOverlay.style.left = '0';
-        svgOverlay.style.width = '100%';
-        svgOverlay.style.height = '100%';
-        svgOverlay.style.pointerEvents = 'none';
-        container.style.position = 'relative';
-        container.appendChild(svgOverlay);
-    }
-    
-    // Clear existing lines
-    while (svgOverlay.firstChild) {
-        svgOverlay.removeChild(svgOverlay.firstChild);
-    }
-    
-    // Track drawn connections to avoid duplicates
-    const drawnConnections = new Set();
-    
-    // Draw lines for neighbor relationships using SVG
-    for (const [id, country] of Object.entries(countries)) {
-        if (country.neighbors && country.neighbors.length > 0) {
-            const startPos = positions.get(id);
-            if (!startPos) continue;
+        countryEntries.forEach(([id, country], index) => {
+            const countryDiv = document.createElement('div');
+            countryDiv.className = `map-country ${country.type}`;
+            countryDiv.setAttribute('data-territory', (index % 4).toString());
+            countryDiv.setAttribute('data-country-id', id);
             
-            country.neighbors.forEach(neighborId => {
-                // Create unique key for this connection (ordered by IDs)
-                const connectionKey = [id, neighborId].sort().join('-');
-                if (drawnConnections.has(connectionKey)) return;
-                drawnConnections.add(connectionKey);
-                
-                const endPos = positions.get(neighborId);
-                if (!endPos) return;
-                
-                // Create SVG line
-                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                
-                // Convert percentage positions to actual coordinates
-                const x1 = (startPos.x / 100) * containerRect.width;
-                const y1 = (startPos.y / 100) * containerRect.height;
-                const x2 = (endPos.x / 100) * containerRect.width;
-                const y2 = (endPos.y / 100) * containerRect.height;
-                
-                line.setAttribute('x1', x1);
-                line.setAttribute('y1', y1);
-                line.setAttribute('x2', x2);
-                line.setAttribute('y2', y2);
-                line.setAttribute('stroke', '#00ffcc');
-                line.setAttribute('stroke-width', '2');
-                line.setAttribute('stroke-dasharray', '5,5');
-                line.setAttribute('opacity', '0.6');
-                
-                // Highlight if connected to current player
-                if (id === this.currentPlayerId || neighborId === this.currentPlayerId) {
-                    line.setAttribute('stroke', '#00ffcc');
-                    line.setAttribute('stroke-width', '3');
-                    line.setAttribute('opacity', '1');
-                    line.setAttribute('stroke-dasharray', 'none');
-                }
-                
-                svgOverlay.appendChild(line);
+            const angle = (index / countryEntries.length) * 2 * Math.PI;
+            const left = centerX + radius * Math.cos(angle);
+            const top = centerY + radius * Math.sin(angle);
+            
+            countryDiv.style.left = left + '%';
+            countryDiv.style.top = top + '%';
+            countryDiv.style.transform = 'translate(-50%, -50%)';
+            
+            if (index === 0 || id === this.currentPlayerId) {
+                countryDiv.classList.add('has-capital');
+            }
+            
+            if (country.lives <= 1) {
+                countryDiv.classList.add('conflict');
+            }
+            
+            if (id === this.currentPlayerId) {
+                countryDiv.classList.add('selected');
+            }
+            
+            countryDiv.innerHTML = `
+                <div class="territory-info">
+                    <h4>${country.name}</h4>
+                    <div class="stats">
+                        <div class="stat-item">♥ ${country.lives}</div>
+                        <div class="stat-item">💰 ${country.gold?.toFixed(1) || 0}</div>
+                        <div class="stat-item">⚔ ${country.soldiers || 0}</div>
+                        <div class="stat-item">📊 ${country.level}</div>
+                    </div>
+                </div>
+                <div class="resource-indicator">
+                    ${country.gold > 5 ? '<div class="resource-dot gold" title="Rich in gold"></div>' : ''}
+                    ${country.soldiers > 3 ? '<div class="resource-dot soldier" title="Military presence"></div>' : ''}
+                </div>
+                ${country.soldiers > 5 ? '<div class="military-base" title="Military installation"></div>' : ''}
+            `;
+            
+            countryDiv.onclick = (e) => {
+                e.stopPropagation();
+                this.selectTerritory(id, countryDiv);
+            };
+            
+            mapContainer.appendChild(countryDiv);
+        });
+        
+        await this.drawConnectionLines(countries, mapContainer);
+    }
+
+    async drawConnectionLines(countries, container) {
+        document.querySelectorAll('.connection-line').forEach(el => el.remove());
+        
+        const countryElements = container.querySelectorAll('.map-country');
+        if (countryElements.length < 2) return;
+        
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        const positions = new Map();
+        const containerRect = container.getBoundingClientRect();
+        
+        countryElements.forEach((el) => {
+            const rect = el.getBoundingClientRect();
+            positions.set(el.dataset.countryId, {
+                x: ((rect.left + rect.width / 2) - containerRect.left) / containerRect.width * 100,
+                y: ((rect.top + rect.height / 2) - containerRect.top) / containerRect.height * 100,
+                element: el
             });
+        });
+        
+        let svgOverlay = container.querySelector('.map-lines-svg');
+        if (!svgOverlay) {
+            svgOverlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svgOverlay.classList.add('map-lines-svg');
+            svgOverlay.style.position = 'absolute';
+            svgOverlay.style.top = '0';
+            svgOverlay.style.left = '0';
+            svgOverlay.style.width = '100%';
+            svgOverlay.style.height = '100%';
+            svgOverlay.style.pointerEvents = 'none';
+            container.style.position = 'relative';
+            container.appendChild(svgOverlay);
+        }
+        
+        while (svgOverlay.firstChild) {
+            svgOverlay.removeChild(svgOverlay.firstChild);
+        }
+        
+        const drawnConnections = new Set();
+        
+        for (const [id, country] of Object.entries(countries)) {
+            if (country.isAlive === false) continue;
+            if (country.neighbors && country.neighbors.length > 0) {
+                const startPos = positions.get(id);
+                if (!startPos) continue;
+                
+                country.neighbors.forEach(neighborId => {
+                    const neighborCountry = countries[neighborId];
+                    if (!neighborCountry || neighborCountry.isAlive === false) return;
+                    
+                    const connectionKey = [id, neighborId].sort().join('-');
+                    if (drawnConnections.has(connectionKey)) return;
+                    drawnConnections.add(connectionKey);
+                    
+                    const endPos = positions.get(neighborId);
+                    if (!endPos) return;
+                    
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    
+                    const x1 = (startPos.x / 100) * containerRect.width;
+                    const y1 = (startPos.y / 100) * containerRect.height;
+                    const x2 = (endPos.x / 100) * containerRect.width;
+                    const y2 = (endPos.y / 100) * containerRect.height;
+                    
+                    line.setAttribute('x1', x1);
+                    line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2);
+                    line.setAttribute('y2', y2);
+                    line.setAttribute('stroke', '#00ffcc');
+                    line.setAttribute('stroke-width', '2');
+                    line.setAttribute('stroke-dasharray', '5,5');
+                    line.setAttribute('opacity', '0.6');
+                    
+                    if (id === this.currentPlayerId || neighborId === this.currentPlayerId) {
+                        line.setAttribute('stroke', '#00ffcc');
+                        line.setAttribute('stroke-width', '3');
+                        line.setAttribute('opacity', '1');
+                        line.setAttribute('stroke-dasharray', 'none');
+                    }
+                    
+                    svgOverlay.appendChild(line);
+                });
+            }
         }
     }
-}
 
-setupResizeHandler() {
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-        clearTimeout(resizeTimeout);
-        resizeTimeout = setTimeout(() => {
-            if (this.currentPlayerId) {
-                this.updateMap();
-            }
-        }, 250);
-    });
-}
-
-addTerrainFeatures(container) {
-    // Add random mountains
-    for (let i = 0; i < 5; i++) {
-        const mountain = document.createElement('div');
-        mountain.className = 'terrain-feature mountain';
-        mountain.style.left = Math.random() * 90 + '%';
-        mountain.style.top = Math.random() * 90 + '%';
-        container.appendChild(mountain);
-    }
-    
-    // Add random forests
-    for (let i = 0; i < 8; i++) {
-        const forest = document.createElement('div');
-        forest.className = 'terrain-feature forest';
-        forest.style.left = Math.random() * 90 + '%';
-        forest.style.top = Math.random() * 90 + '%';
-        container.appendChild(forest);
-    }
-}
-
-selectTerritory(countryId, element) {
-    // Remove selected class from all territories
-    document.querySelectorAll('.map-country').forEach(el => {
-        el.classList.remove('selected');
-    });
-    
-    // Add selected class to clicked territory
-    element.classList.add('selected');
-    
-    // Show territory details (you can expand this)
-    this.showCountryDetails(countryId);
-    
-    // Highlight connection lines
-    document.querySelectorAll('.connection-line').forEach(line => {
-        line.classList.remove('active');
-    });
-    
-    // Find and highlight lines connected to this territory
-    setTimeout(() => {
-        document.querySelectorAll('.connection-line').forEach(line => {
-            // This is a simplified highlight - you might want to make it more sophisticated
-            if (Math.random() > 0.7) {
-                line.classList.add('active');
-            }
+    setupResizeHandler() {
+        let resizeTimeout;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                if (this.currentPlayerId && this.gameActive) {
+                    this.updateMap();
+                }
+            }, 250);
         });
-    }, 100);
-}
+    }
+
+    addTerrainFeatures(container) {
+        for (let i = 0; i < 5; i++) {
+            const mountain = document.createElement('div');
+            mountain.className = 'terrain-feature mountain';
+            mountain.style.left = Math.random() * 90 + '%';
+            mountain.style.top = Math.random() * 90 + '%';
+            container.appendChild(mountain);
+        }
+        
+        for (let i = 0; i < 8; i++) {
+            const forest = document.createElement('div');
+            forest.className = 'terrain-feature forest';
+            forest.style.left = Math.random() * 90 + '%';
+            forest.style.top = Math.random() * 90 + '%';
+            container.appendChild(forest);
+        }
+    }
+
+    selectTerritory(countryId, element) {
+        document.querySelectorAll('.map-country').forEach(el => {
+            el.classList.remove('selected');
+        });
+        
+        element.classList.add('selected');
+        this.showCountryDetails(countryId);
+        
+        document.querySelectorAll('.connection-line').forEach(line => {
+            line.classList.remove('active');
+        });
+        
+        setTimeout(() => {
+            document.querySelectorAll('.connection-line').forEach(line => {
+                if (Math.random() > 0.7) {
+                    line.classList.add('active');
+                }
+            });
+        }, 100);
+    }
 
     async updateNeighborSelectors() {
         if (!this.currentPlayerId) return;
@@ -1078,8 +1324,8 @@ selectTerritory(countryId, element) {
             }
             
             const player = countries[this.currentPlayerId];
-            if (!player) {
-                console.log('Current player not found');
+            if (!player || player.isAlive === false) {
+                console.log('Current player not found or dead');
                 return;
             }
             
@@ -1090,15 +1336,15 @@ selectTerritory(countryId, element) {
                 neighborSelect.innerHTML = '<option value="">Select a neighbor...</option>';
                 
                 if (player.neighbors && player.neighbors.length > 0) {
-                    player.neighbors.forEach(neighborId => {
+                    for (const neighborId of player.neighbors) {
                         const neighbor = countries[neighborId];
-                        if (neighbor) {
+                        if (neighbor && neighbor.isAlive !== false) {
                             const option = document.createElement('option');
                             option.value = neighborId;
                             option.textContent = `${neighbor.name} (${neighbor.type})`;
                             neighborSelect.appendChild(option);
                         }
-                    });
+                    }
                 } else {
                     const option = document.createElement('option');
                     option.value = "";
@@ -1115,7 +1361,7 @@ selectTerritory(countryId, element) {
                 let hasOtherPlayers = false;
                 
                 countryEntries.forEach(([id, country]) => {
-                    if (id !== this.currentPlayerId) {
+                    if (id !== this.currentPlayerId && country.isAlive !== false) {
                         hasOtherPlayers = true;
                         const option = document.createElement('option');
                         option.value = id;

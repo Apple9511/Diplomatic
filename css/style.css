@@ -283,28 +283,9 @@ header h1 {
     display: none !important;
 }
 
-.flag-upload {
-    margin: 25px 0;
-}
 
-.flag-upload label {
-    display: block;
-    margin-bottom: 8px;
-    color: #7cfc00;
-    font-size: 0.9em;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    font-family: 'Courier New', monospace;
-}
 
-.flag-upload input[type="file"] {
-    width: 100%;
-    padding: 12px;
-    background: #0a1a0a;
-    border: 2px solid #2e8b57;
-    color: #7cfc00;
-    font-family: 'Courier New', monospace;
-}
+
 
 .modal-content button {
     width: 100%;
@@ -1227,4 +1208,178 @@ header h1 {
     opacity: 1;
     height: 3px;
     box-shadow: 0 0 8px rgba(0, 255, 204, 0.8);
+}
+
+/* Game Overlay Styles */
+.game-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+    backdrop-filter: blur(5px);
+    animation: fadeIn 0.5s ease;
+}
+
+.game-overlay.victory {
+    background: linear-gradient(135deg, rgba(0, 30, 0, 0.98), rgba(0, 0, 0, 0.98));
+    border: 4px solid #ffd700;
+}
+
+.game-overlay.defeat {
+    background: linear-gradient(135deg, rgba(30, 0, 0, 0.98), rgba(0, 0, 0, 0.98));
+    border: 4px solid #dc143c;
+}
+
+.game-over-content {
+    text-align: center;
+    padding: 40px;
+    max-width: 500px;
+    width: 90%;
+    background: #0f1f0f;
+    border: 3px solid #2e8b57;
+    box-shadow: 0 0 50px rgba(0, 255, 0, 0.3);
+    animation: slideUp 0.5s ease;
+}
+
+.victory .game-over-content {
+    border-color: #ffd700;
+    box-shadow: 0 0 50px rgba(255, 215, 0, 0.3);
+}
+
+.defeat .game-over-content {
+    border-color: #dc143c;
+    box-shadow: 0 0 50px rgba(220, 20, 60, 0.3);
+}
+
+.victory-icon, .defeat-icon {
+    font-size: 80px;
+    margin-bottom: 20px;
+    animation: bounce 0.5s ease;
+}
+
+.game-over-content h1 {
+    font-size: 3em;
+    margin-bottom: 20px;
+    letter-spacing: 5px;
+    font-family: 'Courier New', monospace;
+}
+
+.victory h1 {
+    color: #ffd700;
+    text-shadow: 0 0 20px #ffd700;
+}
+
+.defeat h1 {
+    color: #dc143c;
+    text-shadow: 0 0 20px #dc143c;
+}
+
+.game-over-content h2 {
+    color: #7cfc00;
+    margin-bottom: 20px;
+    font-size: 1.5em;
+}
+
+.game-over-content p {
+    color: #adff2f;
+    margin-bottom: 30px;
+    font-size: 1.1em;
+}
+
+.game-stats {
+    background: #0a1a0a;
+    padding: 20px;
+    margin: 20px 0;
+    border: 2px solid #2e8b57;
+    text-align: left;
+}
+
+.game-stats h3 {
+    color: #7cfc00;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.game-stats p {
+    margin: 8px 0;
+    font-size: 0.9em;
+}
+
+.game-over-content button {
+    background: #0a1a0a;
+    border: 3px solid #2e8b57;
+    color: #7cfc00;
+    padding: 12px 30px;
+    margin: 10px;
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    transition: all 0.2s ease;
+}
+
+.game-over-content button:hover {
+    background: #1a3a1a;
+    border-color: #adff2f;
+    transform: scale(1.05);
+}
+
+.victory .game-over-content button {
+    border-color: #ffd700;
+    color: #ffd700;
+}
+
+.victory .game-over-content button:hover {
+    background: #ffd700;
+    color: #0a1a0a;
+}
+
+.defeat .game-over-content button {
+    border-color: #dc143c;
+    color: #dc143c;
+}
+
+.defeat .game-over-content button:hover {
+    background: #dc143c;
+    color: #0a1a0a;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(50px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes bounce {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+}
+
+/* Disabled button styles */
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
