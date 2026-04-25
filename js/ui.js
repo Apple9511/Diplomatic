@@ -24,21 +24,10 @@ function initializeUI() {
             
             const countryData = {
                 name: document.getElementById('countryName').value,
-                type: document.getElementById('countryType').value,
-                flag: null
+                type: document.getElementById('countryType').value
             };
             
-            const flagInput = document.getElementById('flagUpload');
-            if (flagInput.files && flagInput.files[0]) {
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    countryData.flag = event.target.result;
-                    await window.game.createCountry(countryData);
-                };
-                reader.readAsDataURL(flagInput.files[0]);
-            } else {
-                await window.game.createCountry(countryData);
-            }
+            await window.game.createCountry(countryData);
         });
     }
     

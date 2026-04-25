@@ -119,7 +119,6 @@ class Game {
                 level: 1,
                 upgradePoints: 0,
                 neighbors: [],
-                flag: countryData.flag || null,
                 createdAt: firebase.database.ServerValue.TIMESTAMP,
                 lastDailyUpdate: firebase.database.ServerValue.TIMESTAMP
             };

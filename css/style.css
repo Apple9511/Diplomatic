@@ -911,17 +911,6 @@ header h1 {
 }
 
 /* Capital City Indicator */
-.map-country.has-capital::after {
-    content: '★';
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    color: #ffd700;
-    font-size: 20px;
-    text-shadow: 0 0 10px #ffaa00;
-    animation: pulse 2s infinite;
-    z-index: 7;
-}
 
 /* Military Installations */
 .map-country .military-base {
