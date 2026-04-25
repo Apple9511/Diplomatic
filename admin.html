@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Control Panel - Diplomatic</title>
+    <link rel="stylesheet" href="css/admin.css">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Header -->
+        <header>
+            <h1>> ADMIN CONTROL PANEL v1.0 <</h1>
+            <div class="admin-stats">
+                <span>🟢 LIVE MONITORING</span>
+                <span id="lastUpdate">Last update: --:--:--</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="admin-content">
+            <!-- Sidebar -->
+            <div class="admin-sidebar">
+                <div class="stats-panel">
+                    <h3>> GLOBAL STATISTICS <</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Nations:</span>
+                        <span class="stat-value" id="totalNations">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Active Nations:</span>
+                        <span class="stat-value" id="activeNations">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Eliminated:</span>
+                        <span class="stat-value" id="eliminatedNations">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Economic:</span>
+                        <span class="stat-value" id="economicCount">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Wartime:</span>
+                        <span class="stat-value" id="wartimeCount">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Gold:</span>
+                        <span class="stat-value" id="totalGold">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Soldiers:</span>
+                        <span class="stat-value" id="totalSoldiers">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Active Trades:</span>
+                        <span class="stat-value" id="activeTrades">0</span>
+                    </div>
+                </div>
+
+                <div class="admin-actions">
+                    <h3>> ADMIN COMMANDS <</h3>
+                    <button id="refreshData" class="admin-btn">⟳ REFRESH DATA</button>
+                    <button id="resetGame" class="admin-btn danger">⚠ RESET GAME</button>
+                    <button id="clearDefeated" class="admin-btn">🗑 CLEAR DEFEATED</button>
+                    <button id="exportData" class="admin-btn">📊 EXPORT DATA</button>
+                </div>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="admin-main">
+                <!-- Map View -->
+                <div class="map-panel">
+                    <h3>> STRATEGIC MAP VIEW <</h3>
+                    <div id="adminMapContainer" class="admin-map-container">
+                        <!-- Map will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Countries List -->
+                <div class="countries-panel">
+                    <h3>> NATIONS DATABASE <</h3>
+                    <div class="search-bar">
+                        <input type="text" id="searchCountries" placeholder="Search by name...">
+                        <select id="filterType">
+                            <option value="all">All Types</option>
+                            <option value="economic">Economic</option>
+                            <option value="wartime">Wartime</option>
+                        </select>
+                        <select id="filterStatus">
+                            <option value="all">All Status</option>
+                            <option value="active">Active</option>
+                            <option value="defeated">Defeated</option>
+                        </select>
+                    </div>
+                    <div id="countriesList" class="countries-list">
+                        <!-- Countries will be listed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Trade Monitor -->
+        <div class="trade-monitor">
+            <h3>> ACTIVE TRADE MONITOR <</h3>
+            <div id="tradesList" class="trades-list">
+                <!-- Active trades will be shown here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <!-- Admin Script -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>
