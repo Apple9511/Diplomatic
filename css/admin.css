@@ -445,3 +445,161 @@ header h1 {
         gap: 5px;
     }
 }
+
+/* Action Log Monitor */
+.action-log-monitor {
+    background: #0f1f0f;
+    border: 2px solid #2e8b57;
+    padding: 20px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+}
+
+.log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.log-header h3 {
+    color: #7cfc00;
+    margin: 0;
+}
+
+.log-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.log-controls select, .log-controls input, .log-btn {
+    background: #0a1a0a;
+    border: 1px solid #2e8b57;
+    color: #7cfc00;
+    padding: 8px 12px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+}
+
+.log-controls input {
+    min-width: 150px;
+}
+
+.log-btn:hover {
+    background: #1a3a1a;
+}
+
+.action-logs-list {
+    max-height: 600px;
+    overflow-y: auto;
+    background: #0a1a0a;
+    border: 1px solid #2e8b57;
+}
+
+.log-entry {
+    border-bottom: 1px solid #1a3a1a;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 150px 120px 120px 1fr 100px 150px 150px;
+    gap: 10px;
+    align-items: center;
+    font-size: 0.85em;
+    transition: background 0.2s;
+}
+
+.log-entry:hover {
+    background: #1a2a1a;
+}
+
+.log-time {
+    color: #ffaa00;
+    font-size: 0.8em;
+}
+
+.log-player {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.player-type {
+    font-size: 1.1em;
+}
+
+.player-type.economic {
+    color: #ffd700;
+}
+
+.player-type.wartime {
+    color: #ff4500;
+}
+
+.log-action {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.action-icon {
+    font-size: 1.1em;
+}
+
+.action-name {
+    text-transform: uppercase;
+    font-size: 0.8em;
+    font-weight: bold;
+}
+
+.log-details {
+    color: #adff2f;
+    font-size: 0.85em;
+    word-break: break-word;
+}
+
+.log-result {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.result-icon {
+    font-size: 1em;
+}
+
+.result-text {
+    text-transform: uppercase;
+    font-size: 0.75em;
+    font-weight: bold;
+}
+
+.log-result-success .result-text { color: #228b22; }
+.log-result-failed .result-text { color: #dc143c; }
+.log-result-victory .result-text { color: #ffd700; }
+.log-result-levelup .result-text { color: #7cfc00; }
+
+.log-target {
+    color: #888;
+    font-size: 0.7em;
+    font-family: monospace;
+}
+
+.log-stats {
+    color: #2e8b57;
+    font-size: 0.7em;
+    text-align: right;
+}
+
+/* Make log responsive */
+@media (max-width: 1200px) {
+    .log-entry {
+        grid-template-columns: 1fr;
+        gap: 5px;
+    }
+    
+    .log-stats {
+        text-align: left;
+    }
+}

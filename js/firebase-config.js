@@ -11,9 +11,17 @@ const firebaseConfig = {
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
 
-// Database references
+// Get references
+const database = firebase.database();
 const countriesRef = database.ref('countries');
-const gameStateRef = database.ref('gameState');
 const tradesRef = database.ref('trades');
+const gameStateRef = database.ref('gameState');
+const actionsLogRef = database.ref('actionsLog'); // NEW: For logging all player actions
+
+// Make them globally available
+window.database = database;
+window.countriesRef = countriesRef;
+window.tradesRef = tradesRef;
+window.gameStateRef = gameStateRef;
+window.actionsLogRef = actionsLogRef;

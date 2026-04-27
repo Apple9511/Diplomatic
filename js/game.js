@@ -9,7 +9,6 @@ class Game {
         this.gameActive = true;
         this.winnerDeclared = false;
         
-        // Check if database is available
         if (typeof database !== 'undefined' && database) {
             this.initializeGame();
         } else {
@@ -130,6 +129,7 @@ class Game {
             const newCountryRef = countriesRef.push();
             const countryId = newCountryRef.key;
             
+            const now = Date.now();
             const country = {
                 id: countryId,
                 name: countryData.name,
@@ -144,7 +144,9 @@ class Game {
                 ownerId: countryId,
                 isAlive: true,
                 createdAt: firebase.database.ServerValue.TIMESTAMP,
-                lastDailyUpdate: firebase.database.ServerValue.TIMESTAMP
+                lastDailyUpdate: firebase.database.ServerValue.TIMESTAMP,
+                lastDailyReset: now,
+                lastResetDay: new Date(now).getDate()
             };
 
             await newCountryRef.set(country);
@@ -194,29 +196,65 @@ class Game {
     }
 
     startDailyTimer() {
-        this.gameInterval = setInterval(async () => {
-            if (this.gameActive) {
-                await this.checkDailyUpdate();
-            }
-        }, 60000);
+        // Check for missed resets every minute
+        this.dailyCheckInterval = setInterval(async () => {
+            await this.checkAllPlayersForDailyReset();
+        }, 60000); // Check every minute
         
+        // Update countdown display every second
         setInterval(() => this.updateCountdown(), 1000);
+        
+        // Initial check on startup
+        setTimeout(() => {
+            this.checkAllPlayersForDailyReset();
+        }, 5000);
     }
 
-    async checkDailyUpdate() {
-        if (!this.currentPlayerId || !this.gameActive) return;
-        
-        const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const country = snapshot.val();
-        
-        if (!country || country.isAlive === false) return;
-        
-        const now = Date.now();
-        const lastUpdate = country.lastDailyUpdate || now;
-        const hoursSinceUpdate = (now - lastUpdate) / (1000 * 60 * 60);
-        
-        if (hoursSinceUpdate >= 24) {
-            await this.performDailyUpdate(this.currentPlayerId, country);
+    async checkAllPlayersForDailyReset() {
+        try {
+            const snapshot = await countriesRef.once('value');
+            const countries = snapshot.val();
+            
+            if (!countries) return;
+            
+            const now = new Date();
+            const currentDay = now.getDate();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+            
+            let anyUpdates = false;
+            
+            for (const [id, country] of Object.entries(countries)) {
+                if (country.isAlive === false) continue;
+                
+                const lastResetDay = country.lastResetDay;
+                const lastResetDate = country.lastDailyReset || 0;
+                const lastReset = new Date(lastResetDate);
+                
+                // Check if reset happened on a different day
+                const needsReset = (
+                    lastResetDay !== currentDay ||
+                    lastReset.getMonth() !== currentMonth ||
+                    lastReset.getFullYear() !== currentYear
+                );
+                
+                if (needsReset) {
+                    console.log(`Daily reset needed for ${country.name} - Last reset: ${lastReset.toLocaleString()}`);
+                    await this.performDailyUpdate(id, country);
+                    anyUpdates = true;
+                }
+            }
+            
+            if (anyUpdates && this.currentPlayerId && this.gameActive) {
+                // Refresh current player's UI if they got updated
+                const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+                const updatedPlayer = playerSnapshot.val();
+                if (updatedPlayer) {
+                    this.updatePlayerUI(updatedPlayer);
+                }
+            }
+        } catch (error) {
+            console.error('Error checking daily resets:', error);
         }
     }
 
@@ -226,6 +264,7 @@ class Game {
         let goldEarned = GAME_CONFIG.BASE_GOLD_PER_DAY;
         let actionsEarned = GAME_CONFIG.BASE_ACTIONS_PER_DAY;
         
+        // Economic bonus
         if (country.type === 'economic' && country.level > 1) {
             for (let i = 2; i <= country.level; i++) {
                 if (GAME_CONFIG.ECONOMIC_BONUSES[i]?.goldPerDay) {
@@ -234,267 +273,261 @@ class Game {
             }
         }
         
-        const daysSinceUpdate = Math.floor((Date.now() - country.lastDailyUpdate) / (1000 * 60 * 60 * 24));
-        if (daysSinceUpdate >= 7) {
-            const weeksPassed = Math.floor(daysSinceUpdate / 7);
-            const newUpgradePoints = Math.max(0, (country.upgradePoints || 0) - (weeksPassed * GAME_CONFIG.UPGRADE_WEEKLY_DECAY));
-            updates.upgradePoints = newUpgradePoints;
+        // Wartime bonus for actions
+        if (country.type === 'wartime' && country.level >= 2) {
+            actionsEarned += 0.5;
         }
         
-        updates.gold = (country.gold || 0) + goldEarned;
-        updates.actions = (country.actions || 0) + actionsEarned;
+        const newGold = (country.gold || 0) + goldEarned;
+        const newActions = (country.actions || 0) + actionsEarned;
+        
+        const now = Date.now();
+        const nowDate = new Date(now);
+        
+        updates.gold = newGold;
+        updates.actions = newActions;
         updates.lastDailyUpdate = firebase.database.ServerValue.TIMESTAMP;
+        updates.lastDailyReset = now;
+        updates.lastResetDay = nowDate.getDate();
         
         await countriesRef.child(countryId).update(updates);
+        
+        console.log(`Daily reset complete for ${country.name}: +${goldEarned} gold, +${actionsEarned} actions`);
+        
+        // Show notification to current player if this is their country
+        if (countryId === this.currentPlayerId && this.gameActive) {
+            this.showMessage(`🌙 Daily Reset! +${goldEarned} gold, +${actionsEarned} actions!`, 'success');
+        }
     }
 
     async buySoldier() {
-        if (!this.currentPlayerId || !this.gameActive) return;
-        
-        const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const country = snapshot.val();
-        
-        if (!country || country.isAlive === false) {
-            this.showMessage('Your country is no longer active!', 'failure');
-            return;
-        }
-        
-        let soldierCost = 2;
-        
-        if (country.type === 'economic') {
-            soldierCost = 1 + country.level;
-        }
-        
-        if (country.type === 'wartime' && country.level >= 3) {
-            soldierCost = 1.5;
-        }
-        
-        if (country.gold >= soldierCost) {
-            const updates = {
-                gold: country.gold - soldierCost,
-                soldiers: (country.soldiers || 0) + 1
-            };
-            
-            await countriesRef.child(this.currentPlayerId).update(updates);
-            this.showMessage(`Soldier purchased for ${soldierCost} gold!`, 'success');
-        } else {
-            this.showMessage(`Not enough gold! Need ${soldierCost} gold.`, 'failure');
-        }
-    }
-
-    async fortify(targetId = null) {
-        if (!this.currentPlayerId || !this.gameActive) return;
-        
-        const target = targetId || this.currentPlayerId;
-        const snapshot = await countriesRef.child(target).once('value');
-        const country = snapshot.val();
-        
-        if (!country || (target !== this.currentPlayerId && country.isAlive === false)) {
-            this.showMessage('Target country is not active!', 'failure');
-            return;
-        }
-        
-        if (target !== this.currentPlayerId) {
-            const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-            const player = playerSnapshot.val();
-            if (!player.neighbors || !player.neighbors.includes(target)) {
-                this.showMessage('You can only heal neighboring countries!', 'failure');
-                return;
-            }
-        }
-        
-        if (target === this.currentPlayerId) {
-            const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-            const player = playerSnapshot.val();
-            
-            if (player.actions < 1) {
-                this.showMessage('Not enough actions!', 'failure');
-                return;
-            }
-            
-            let goldCost = 0;
-            if (player.type === 'economic' && player.level >= 4) {
-                goldCost = 2;
-                if (player.gold < goldCost) {
-                    this.showMessage(`Not enough gold! Need ${goldCost} gold to fortify.`, 'failure');
-                    return;
-                }
-            }
-            
-            if (country.lives < GAME_CONFIG.MAX_LIVES) {
-                const updates = {
-                    lives: Math.min(country.lives + 1, GAME_CONFIG.MAX_LIVES),
-                    actions: player.actions - 1
-                };
-                
-                if (goldCost > 0) {
-                    updates.gold = player.gold - goldCost;
-                }
-                
-                await countriesRef.child(this.currentPlayerId).update(updates);
-                this.showMessage('Fortification successful! +1 Life', 'success');
-            } else {
-                this.showMessage('Already at maximum lives!', 'failure');
-            }
-        }
-    }
-
-    async attack(neighborId) {
-        if (!this.currentPlayerId || !this.gameActive) return;
-        
-        const attackerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const attacker = attackerSnapshot.val();
-        const defenderSnapshot = await countriesRef.child(neighborId).once('value');
-        const defender = defenderSnapshot.val();
-        
-        if (!defender) {
-            this.showMessage('Target country not found!', 'failure');
-            return;
-        }
-        
-        if (defender.isAlive === false) {
-            this.showMessage('Target country is already defeated!', 'failure');
-            return;
-        }
-        
-        if (attacker.soldiers < 1) {
-            this.showMessage('Need at least 1 soldier to attack!', 'failure');
-            return;
-        }
-        
-        if (attacker.actions < 1) {
-            this.showMessage('Need 1 action to attack!', 'failure');
-            return;
-        }
-        
-        if (!attacker.neighbors || !attacker.neighbors.includes(neighborId)) {
-            this.showMessage('You can only attack neighboring countries!', 'failure');
-            return;
-        }
-        
-        let attackSuccess = Math.random() < 0.5;
-        
-        if (!attackSuccess && attacker.type === 'wartime' && attacker.level >= 2) {
-            if (attacker.gold >= 2) {
-                if (confirm('Attack failed! Spend 2 gold to reroll?')) {
-                    attackSuccess = Math.random() < 0.5;
-                    await countriesRef.child(this.currentPlayerId).child('gold').set(attacker.gold - 2);
-                }
-            }
-        }
-        
-        const updates = {
-            soldiers: attacker.soldiers - 1,
-            actions: attacker.actions - 1
-        };
-        
-        if (attackSuccess) {
-            const defenderUpdates = {
-                lives: defender.lives - 1,
-                gold: Math.max(0, (defender.gold || 0) - 1)
-            };
-            
-            if (defender.lives - 1 <= 0) {
-                defenderUpdates.isAlive = false;
-                defenderUpdates.lives = 0;
-                
-                this.showMessage(`You defeated ${defender.name}!`, 'success');
-                
-                updates.gold = (attacker.gold || 0) + 5;
-                this.showMessage(`+5 Gold reward for victory!`, 'success');
-                
-                await this.checkPlayerElimination(neighborId);
-            } else {
-                updates.gold = (attacker.gold || 0) + 1;
-                this.showMessage('Attack successful! Stole 1 gold!', 'success');
-            }
-            
-            await countriesRef.child(neighborId).update(defenderUpdates);
-        } else {
-            this.showMessage('Attack failed!', 'failure');
-        }
-        
-        await countriesRef.child(this.currentPlayerId).update(updates);
-        await this.checkWinCondition();
-    }
-
-    async checkPlayerElimination(defeatedCountryId) {
-    const defeatedSnapshot = await countriesRef.child(defeatedCountryId).once('value');
-    const defeatedCountry = defeatedSnapshot.val();
+    if (!this.currentPlayerId || !this.gameActive) return;
     
-    if (!defeatedCountry) return;
+    const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
+    const country = snapshot.val();
     
-    const allCountries = await countriesRef.once('value');
-    const countries = allCountries.val();
-    
-    const totalCountriesEver = Object.keys(countries).length;
-    
-    // Don't eliminate if this is the only country in the game
-    if (totalCountriesEver <= 1) {
+    if (!country || country.isAlive === false) {
+        this.showMessage('Your country is no longer active!', 'failure');
         return;
     }
     
-    const playerCountries = Object.entries(countries).filter(([id, country]) => 
-        country.ownerId === defeatedCountry.ownerId && country.isAlive !== false && id !== defeatedCountryId
-    );
+    let soldierCost = 2;
     
-    if (playerCountries.length === 0) {
-        const eliminatedPlayerId = defeatedCountry.ownerId;
-        this.showMessage(`Player ${defeatedCountry.name} has been ELIMINATED from the game!`, 'failure');
+    if (country.type === 'economic') {
+        soldierCost = 1 + country.level;
+    }
+    
+    if (country.type === 'wartime' && country.level >= 3) {
+        soldierCost = 1.5;
+    }
+    
+    if (country.gold >= soldierCost) {
+        const updates = {
+            gold: country.gold - soldierCost,
+            soldiers: (country.soldiers || 0) + 1
+        };
         
-        if (eliminatedPlayerId === this.currentPlayerId) {
-            await this.handleDefeat('Your last country has been conquered! You are eliminated!');
-        }
+        await countriesRef.child(this.currentPlayerId).update(updates);
+        this.showMessage(`Soldier purchased for ${soldierCost} gold!`, 'success');
         
-        // Now check win condition after elimination
-        await this.checkWinCondition();
+        // Log the action
+        await this.logAction('BUY_SOLDIER', `Purchased 1 soldier for ${soldierCost} gold`, null, 'success');
+    } else {
+        this.showMessage(`Not enough gold! Need ${soldierCost} gold.`, 'failure');
+        await this.logAction('BUY_SOLDIER', `Attempted to buy soldier but only had ${country.gold} gold`, null, 'failed - insufficient gold');
     }
 }
 
-async checkWinCondition() {
-    if (this.winnerDeclared) return;
+
+   async fortify(targetId = null) {
+    if (!this.currentPlayerId || !this.gameActive) return;
     
-    const snapshot = await countriesRef.once('value');
-    const countries = snapshot.val();
+    const target = targetId || this.currentPlayerId;
+    const snapshot = await countriesRef.child(target).once('value');
+    const country = snapshot.val();
     
-    if (!countries) return;
-    
-    // Get all alive countries
-    const aliveCountries = Object.entries(countries).filter(([id, country]) => 
-        country.isAlive !== false
-    );
-    
-    // Don't check win condition if there's only 1 total country ever created
-    // This prevents instant victory at game start
-    const totalCountriesEver = Object.keys(countries).length;
-    if (totalCountriesEver < 2) {
-        return; // Game hasn't really started yet
+    if (!country || (target !== this.currentPlayerId && country.isAlive === false)) {
+        this.showMessage('Target country is not active!', 'failure');
+        return;
     }
     
-    // Get unique owners of alive countries
-    const uniqueOwners = new Set();
-    aliveCountries.forEach(([id, country]) => {
-        uniqueOwners.add(country.ownerId || id);
-    });
+    if (target !== this.currentPlayerId) {
+        const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+        const player = playerSnapshot.val();
+        if (!player.neighbors || !player.neighbors.includes(target)) {
+            this.showMessage('You can only heal neighboring countries!', 'failure');
+            await this.logAction('FORTIFY', `Attempted to heal non-neighbor ${country.name}`, target, 'failed - not neighbor');
+            return;
+        }
+    }
     
-    // Only declare victory if there's exactly 1 owner AND we've had at least 2 players total
-    if (uniqueOwners.size === 1 && aliveCountries.length > 0 && totalCountriesEver >= 2) {
-        // Make sure this isn't just the first player alone
-        if (aliveCountries.length === totalCountriesEver && totalCountriesEver === 1) {
-            return; // Still just one player, no victory
+    if (target === this.currentPlayerId) {
+        const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+        const player = playerSnapshot.val();
+        
+        if (player.actions < 1) {
+            this.showMessage('Not enough actions!', 'failure');
+            await this.logAction('FORTIFY', 'Attempted to fortify with 0 actions', null, 'failed - no actions');
+            return;
         }
         
-        const winnerId = Array.from(uniqueOwners)[0];
-        const winnerCountry = aliveCountries.find(([id, country]) => 
-            (country.ownerId || id) === winnerId
-        )[1];
+        let goldCost = 0;
+        if (player.type === 'economic' && player.level >= 4) {
+            goldCost = 2;
+            if (player.gold < goldCost) {
+                this.showMessage(`Not enough gold! Need ${goldCost} gold to fortify.`, 'failure');
+                await this.logAction('FORTIFY', `Attempted to fortify but only had ${player.gold} gold`, null, 'failed - insufficient gold');
+                return;
+            }
+        }
         
-        this.winnerDeclared = true;
-        this.gameActive = false;
-        
-        this.showVictory(winnerCountry.name);
+        if (country.lives < GAME_CONFIG.MAX_LIVES) {
+            const updates = {
+                lives: Math.min(country.lives + 1, GAME_CONFIG.MAX_LIVES),
+                actions: player.actions - 1
+            };
+            
+            if (goldCost > 0) {
+                updates.gold = player.gold - goldCost;
+            }
+            
+            await countriesRef.child(this.currentPlayerId).update(updates);
+            this.showMessage('Fortification successful! +1 Life', 'success');
+            await this.logAction('FORTIFY', `Increased lives from ${country.lives} to ${country.lives + 1}`, null, 'success');
+        } else {
+            this.showMessage('Already at maximum lives!', 'failure');
+            await this.logAction('FORTIFY', `Attempted to fortify but already at max lives (${country.lives}/${GAME_CONFIG.MAX_LIVES})`, null, 'failed - max lives');
+        }
     }
 }
+
+    async attack(neighborId) {
+    if (!this.currentPlayerId || !this.gameActive) return;
+    
+    const attackerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+    const attacker = attackerSnapshot.val();
+    const defenderSnapshot = await countriesRef.child(neighborId).once('value');
+    const defender = defenderSnapshot.val();
+    
+    if (!defender) {
+        this.showMessage('Target country not found!', 'failure');
+        return;
+    }
+    
+    if (defender.isAlive === false) {
+        this.showMessage('Target country is already defeated!', 'failure');
+        await this.logAction('ATTACK', `Attempted to attack already defeated country ${defender.name}`, neighborId, 'failed - already defeated');
+        return;
+    }
+    
+    if (attacker.soldiers < 1) {
+        this.showMessage('Need at least 1 soldier to attack!', 'failure');
+        await this.logAction('ATTACK', `Attempted to attack with 0 soldiers`, neighborId, 'failed - no soldiers');
+        return;
+    }
+    
+    if (attacker.actions < 1) {
+        this.showMessage('Need 1 action to attack!', 'failure');
+        await this.logAction('ATTACK', `Attempted to attack with 0 actions`, neighborId, 'failed - no actions');
+        return;
+    }
+    
+    if (!attacker.neighbors || !attacker.neighbors.includes(neighborId)) {
+        this.showMessage('You can only attack neighboring countries!', 'failure');
+        await this.logAction('ATTACK', `Attempted to attack non-neighbor ${defender.name}`, neighborId, 'failed - not neighbor');
+        return;
+    }
+    
+    let attackSuccess = Math.random() < 0.5;
+    let rerollUsed = false;
+    
+    if (!attackSuccess && attacker.type === 'wartime' && attacker.level >= 2) {
+        if (attacker.gold >= 2) {
+            if (confirm('Attack failed! Spend 2 gold to reroll?')) {
+                attackSuccess = Math.random() < 0.5;
+                rerollUsed = true;
+                await countriesRef.child(this.currentPlayerId).child('gold').set(attacker.gold - 2);
+            }
+        }
+    }
+    
+    const updates = {
+        soldiers: attacker.soldiers - 1,
+        actions: attacker.actions - 1
+    };
+    
+    if (attackSuccess) {
+        const defenderUpdates = {
+            lives: defender.lives - 1,
+            gold: Math.max(0, (defender.gold || 0) - 1)
+        };
+        
+        if (defender.lives - 1 <= 0) {
+            defenderUpdates.isAlive = false;
+            defenderUpdates.lives = 0;
+            
+            this.showMessage(`You defeated ${defender.name}!`, 'success');
+            
+            updates.gold = (attacker.gold || 0) + 5;
+            this.showMessage(`+5 Gold reward for victory!`, 'success');
+            
+            await this.logAction('ATTACK', `Defeated ${defender.name} and conquered their territory${rerollUsed ? ' (used reroll)' : ''}`, neighborId, 'victory');
+            
+            await this.checkPlayerElimination(neighborId);
+        } else {
+            updates.gold = (attacker.gold || 0) + 1;
+            this.showMessage('Attack successful! Stole 1 gold!', 'success');
+            await this.logAction('ATTACK', `Successfully attacked ${defender.name}, stole 1 gold, dealt 1 damage${rerollUsed ? ' (used reroll)' : ''}`, neighborId, 'success');
+        }
+        
+        await countriesRef.child(neighborId).update(defenderUpdates);
+    } else {
+        this.showMessage('Attack failed!', 'failure');
+        await this.logAction('ATTACK', `Failed to attack ${defender.name}${rerollUsed ? ' (reroll also failed)' : ''}`, neighborId, 'failed');
+    }
+    
+    await countriesRef.child(this.currentPlayerId).update(updates);
+    await this.checkWinCondition();
+}
+
+    async checkWinCondition() {
+        if (this.winnerDeclared) return;
+        
+        const snapshot = await countriesRef.once('value');
+        const countries = snapshot.val();
+        
+        if (!countries) return;
+        
+        const aliveCountries = Object.entries(countries).filter(([id, country]) => 
+            country.isAlive !== false
+        );
+        
+        const totalCountriesEver = Object.keys(countries).length;
+        if (totalCountriesEver < 2) {
+            return;
+        }
+        
+        const uniqueOwners = new Set();
+        aliveCountries.forEach(([id, country]) => {
+            uniqueOwners.add(country.ownerId || id);
+        });
+        
+        if (uniqueOwners.size === 1 && aliveCountries.length > 0 && totalCountriesEver >= 2) {
+            if (aliveCountries.length === totalCountriesEver && totalCountriesEver === 1) {
+                return;
+            }
+            
+            const winnerId = Array.from(uniqueOwners)[0];
+            const winnerCountry = aliveCountries.find(([id, country]) => 
+                (country.ownerId || id) === winnerId
+            )[1];
+            
+            this.winnerDeclared = true;
+            this.gameActive = false;
+            
+            this.showVictory(winnerCountry.name);
+        }
+    }
 
     async handleDefeat(reason) {
         if (!this.gameActive) return;
@@ -624,168 +657,134 @@ async checkWinCondition() {
     }
 
     async upgrade() {
-        if (!this.currentPlayerId || !this.gameActive) return;
-        
+    if (!this.currentPlayerId || !this.gameActive) return;
+    
+    const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
+    const country = snapshot.val();
+    
+    if (!country || country.isAlive === false) {
+        this.showMessage('Your country is no longer active!', 'failure');
+        return;
+    }
+    
+    if (country.actions < 1) {
+        this.showMessage('Not enough actions!', 'failure');
+        await this.logAction('UPGRADE', 'Attempted to upgrade with 0 actions', null, 'failed - no actions');
+        return;
+    }
+    
+    if (country.level >= 4) {
+        this.showMessage('Already at maximum level!', 'failure');
+        await this.logAction('UPGRADE', `Attempted to upgrade but already at max level ${country.level}`, null, 'failed - max level');
+        return;
+    }
+    
+    const newUpgradePoints = (country.upgradePoints || 0) + 1;
+    const nextLevel = country.level + 1;
+    const requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[nextLevel];
+    
+    const updates = {
+        actions: country.actions - 1,
+        upgradePoints: newUpgradePoints
+    };
+    
+    let leveledUp = false;
+    if (newUpgradePoints >= requiredPoints) {
+        updates.level = nextLevel;
+        updates.upgradePoints = newUpgradePoints - requiredPoints;
+        leveledUp = true;
+        this.showMessage(`Level Up! Now level ${nextLevel}!`, 'success');
+    }
+    
+    await countriesRef.child(this.currentPlayerId).update(updates);
+    
+    if (leveledUp) {
+        await this.logAction('UPGRADE', `Upgraded from level ${country.level} to ${nextLevel} (${newUpgradePoints}/${requiredPoints} points)`, null, 'level_up');
+    } else {
+        await this.logAction('UPGRADE', `Gained 1 upgrade point (${newUpgradePoints}/${requiredPoints} for next level)`, null, 'progress');
+    }
+}
+
+
+    async proposeTrade(tradeData) {
+    if (!this.currentPlayerId || !this.gameActive) {
+        this.showMessage('Game is not active!', 'failure');
+        return;
+    }
+    
+    try {
         const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const country = snapshot.val();
+        const player = snapshot.val();
         
-        if (!country || country.isAlive === false) {
-            this.showMessage('Your country is no longer active!', 'failure');
+        if (!player || player.isAlive === false) {
+            this.showMessage('Your country is not active!', 'failure');
             return;
         }
         
-        if (country.actions < 1) {
-            this.showMessage('Not enough actions!', 'failure');
+        if (player.gold < tradeData.gold) {
+            this.showMessage(`You don't have ${tradeData.gold} gold!`, 'failure');
+            await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.gold} gold but only had ${player.gold}`, tradeData.partnerId, 'failed - insufficient gold');
             return;
         }
         
-        if (country.level >= 4) {
-            this.showMessage('Already at maximum level!', 'failure');
+        if (player.soldiers < tradeData.soldiers) {
+            this.showMessage(`You don't have ${tradeData.soldiers} soldiers!`, 'failure');
+            await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.soldiers} soldiers but only had ${player.soldiers}`, tradeData.partnerId, 'failed - insufficient soldiers');
             return;
         }
         
-        const newUpgradePoints = (country.upgradePoints || 0) + 1;
-        const nextLevel = country.level + 1;
-        const requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[nextLevel];
+        if (tradeData.actions > 0) {
+            if (!player.neighbors || !player.neighbors.includes(tradeData.partnerId)) {
+                this.showMessage('Actions can only be traded with neighboring countries!', 'failure');
+                await this.logAction('TRADE_PROPOSE', `Attempted to trade actions with non-neighbor`, tradeData.partnerId, 'failed - not neighbor');
+                return;
+            }
+            
+            if (player.actions < tradeData.actions) {
+                this.showMessage(`You don't have ${tradeData.actions} actions!`, 'failure');
+                await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.actions} actions but only had ${player.actions}`, tradeData.partnerId, 'failed - insufficient actions');
+                return;
+            }
+        }
         
-        const updates = {
-            actions: country.actions - 1,
-            upgradePoints: newUpgradePoints
+        const tradeRef = tradesRef.push();
+        const trade = {
+            id: tradeRef.key,
+            fromId: this.currentPlayerId,
+            fromName: player.name,
+            toId: tradeData.partnerId,
+            gold: parseInt(tradeData.gold) || 0,
+            soldiers: parseInt(tradeData.soldiers) || 0,
+            actions: parseInt(tradeData.actions) || 0,
+            status: 'pending',
+            createdAt: firebase.database.ServerValue.TIMESTAMP,
+            expiresAt: Date.now() + (24 * 60 * 60 * 1000)
         };
         
-        if (newUpgradePoints >= requiredPoints) {
-            updates.level = nextLevel;
-            updates.upgradePoints = newUpgradePoints - requiredPoints;
-            this.showMessage(`Level Up! Now level ${nextLevel}!`, 'success');
+        const updates = {
+            gold: player.gold - trade.gold,
+            soldiers: player.soldiers - trade.soldiers
+        };
+        
+        if (trade.actions > 0) {
+            updates.actions = player.actions - trade.actions;
         }
         
         await countriesRef.child(this.currentPlayerId).update(updates);
-    }
-
-    async proposeTrade(tradeData) {
-        if (!this.currentPlayerId || !this.gameActive) {
-            this.showMessage('Game is not active!', 'failure');
-            return;
-        }
+        await tradeRef.set(trade);
         
-        try {
-            const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
-            const player = snapshot.val();
-            
-            if (!player || player.isAlive === false) {
-                this.showMessage('Your country is not active!', 'failure');
-                return;
-            }
-            
-            if (player.gold < tradeData.gold) {
-                this.showMessage(`You don't have ${tradeData.gold} gold!`, 'failure');
-                return;
-            }
-            
-            if (player.soldiers < tradeData.soldiers) {
-                this.showMessage(`You don't have ${tradeData.soldiers} soldiers!`, 'failure');
-                return;
-            }
-            
-            if (tradeData.actions > 0) {
-                if (!player.neighbors || !player.neighbors.includes(tradeData.partnerId)) {
-                    this.showMessage('Actions can only be traded with neighboring countries!', 'failure');
-                    return;
-                }
-                
-                if (player.actions < tradeData.actions) {
-                    this.showMessage(`You don't have ${tradeData.actions} actions!`, 'failure');
-                    return;
-                }
-            }
-            
-            const tradeRef = tradesRef.push();
-            const trade = {
-                id: tradeRef.key,
-                fromId: this.currentPlayerId,
-                fromName: player.name,
-                toId: tradeData.partnerId,
-                gold: parseInt(tradeData.gold) || 0,
-                soldiers: parseInt(tradeData.soldiers) || 0,
-                actions: parseInt(tradeData.actions) || 0,
-                status: 'pending',
-                createdAt: firebase.database.ServerValue.TIMESTAMP,
-                expiresAt: Date.now() + (24 * 60 * 60 * 1000)
-            };
-            
-            const updates = {
-                gold: player.gold - trade.gold,
-                soldiers: player.soldiers - trade.soldiers
-            };
-            
-            if (trade.actions > 0) {
-                updates.actions = player.actions - trade.actions;
-            }
-            
-            await countriesRef.child(this.currentPlayerId).update(updates);
-            await tradeRef.set(trade);
-            
-            this.showMessage(`Trade proposal sent!`, 'success');
-            
-            document.getElementById('tradeGold').value = '';
-            document.getElementById('tradeSoldiers').value = '';
-            document.getElementById('tradeActions').value = '';
-            
-        } catch (error) {
-            console.error('Error proposing trade:', error);
-            this.showMessage('Failed to propose trade', 'failure');
-        }
-    }
-
-    async acceptTrade(tradeId) {
-        if (!this.gameActive) {
-            this.showMessage('Game is not active!', 'failure');
-            return;
-        }
+        this.showMessage(`Trade proposal sent!`, 'success');
+        await this.logAction('TRADE_PROPOSE', `Proposed trade: ${trade.gold} gold, ${trade.soldiers} soldiers, ${trade.actions} actions`, tradeData.partnerId, 'sent');
         
-        try {
-            const tradeSnapshot = await tradesRef.child(tradeId).once('value');
-            const trade = tradeSnapshot.val();
-            
-            if (!trade || trade.status !== 'pending') {
-                this.showMessage('This trade is no longer available', 'failure');
-                return;
-            }
-            
-            if (trade.toId !== this.currentPlayerId) {
-                this.showMessage('This trade is not for you!', 'failure');
-                return;
-            }
-            
-            const receiverSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-            const receiver = receiverSnapshot.val();
-            
-            if (!receiver || receiver.isAlive === false) {
-                this.showMessage('Your country is not active!', 'failure');
-                return;
-            }
-            
-            const receiverUpdates = {
-                gold: (receiver.gold || 0) + trade.gold,
-                soldiers: (receiver.soldiers || 0) + trade.soldiers,
-                actions: (receiver.actions || 0) + trade.actions
-            };
-            
-            await tradesRef.child(tradeId).update({ 
-                status: 'accepted',
-                acceptedAt: firebase.database.ServerValue.TIMESTAMP
-            });
-            
-            await countriesRef.child(this.currentPlayerId).update(receiverUpdates);
-            
-            this.showMessage(`Trade accepted! Received resources`, 'success');
-            this.removeTradeNotification(tradeId);
-            
-        } catch (error) {
-            console.error('Error accepting trade:', error);
-            this.showMessage('Failed to accept trade', 'failure');
-        }
+        document.getElementById('tradeGold').value = '';
+        document.getElementById('tradeSoldiers').value = '';
+        document.getElementById('tradeActions').value = '';
+        
+    } catch (error) {
+        console.error('Error proposing trade:', error);
+        this.showMessage('Failed to propose trade', 'failure');
     }
+}
 
     async rejectTrade(tradeId) {
         if (!this.gameActive) return;
@@ -1021,7 +1020,7 @@ async checkWinCondition() {
     checkExistingSession() {
         const savedPlayerId = localStorage.getItem('playerId');
         if (savedPlayerId) {
-            countriesRef.child(savedPlayerId).once('value', (snapshot) => {
+            countriesRef.child(savedPlayerId).once('value', async (snapshot) => {
                 if (snapshot.exists()) {
                     const country = snapshot.val();
                     if (country.isAlive !== false) {
@@ -1055,19 +1054,22 @@ async checkWinCondition() {
     }
 
     updateCountdown() {
-        const now = Date.now();
-        const nextDay = new Date(now);
-        nextDay.setHours(24, 0, 0, 0);
+        const now = new Date();
+        const midnight = new Date(now);
+        midnight.setHours(24, 0, 0, 0);
         
-        const timeLeft = nextDay - now;
+        const timeLeft = midnight - now;
         
         if (timeLeft > 0) {
             const hours = Math.floor(timeLeft / (1000 * 60 * 60));
             const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
             
-            document.getElementById('gameTimer').textContent = 
-                `Next Day: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            const timerElement = document.getElementById('gameTimer');
+            if (timerElement) {
+                timerElement.textContent = 
+                    `Next Daily Reset: ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
         }
     }
 
@@ -1310,6 +1312,49 @@ async checkWinCondition() {
             });
         }, 100);
     }
+
+    async logAction(actionType, details, targetId = null, result = null) {
+    if (!this.currentPlayerId) return;
+    
+    try {
+        const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+        const player = playerSnapshot.val();
+        
+        if (!player) return;
+        
+        const logEntry = {
+            timestamp: firebase.database.ServerValue.TIMESTAMP,
+            playerId: this.currentPlayerId,
+            playerName: player.name,
+            playerType: player.type,
+            action: actionType,
+            details: details,
+            targetId: targetId,
+            result: result,
+            gold: player.gold || 0,
+            soldiers: player.soldiers || 0,
+            actions: player.actions || 0,
+            level: player.level || 1
+        };
+        
+        await actionsLogRef.push().set(logEntry);
+        
+        // Keep only last 1000 logs to prevent database bloat
+        const logsSnapshot = await actionsLogRef.orderByKey().limitToLast(1000).once('value');
+        const logs = logsSnapshot.val();
+        if (logs) {
+            const logKeys = Object.keys(logs);
+            if (logKeys.length > 1000) {
+                const toDelete = logKeys.slice(0, logKeys.length - 1000);
+                for (const key of toDelete) {
+                    await actionsLogRef.child(key).remove();
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error logging action:', error);
+    }
+}
 
     async updateNeighborSelectors() {
         if (!this.currentPlayerId) return;

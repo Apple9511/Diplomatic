@@ -3,6 +3,8 @@ class AdminPanel {
     constructor() {
         this.countriesRef = countriesRef;
         this.tradesRef = tradesRef;
+        this.actionsLogRef = actionsLogRef;
+        this.allLogs = [];
         this.setupListeners();
         this.loadData();
         this.startAutoRefresh();
@@ -23,6 +25,12 @@ class AdminPanel {
             });
         }
 
+        if (this.actionsLogRef) {
+            this.actionsLogRef.on('value', () => {
+                this.loadActionLogs();
+            });
+        }
+
         // Button listeners
         document.getElementById('refreshData')?.addEventListener('click', () => this.loadData());
         document.getElementById('resetGame')?.addEventListener('click', () => this.resetGame());
@@ -32,6 +40,10 @@ class AdminPanel {
         document.getElementById('searchCountries')?.addEventListener('input', () => this.filterCountries());
         document.getElementById('filterType')?.addEventListener('change', () => this.filterCountries());
         document.getElementById('filterStatus')?.addEventListener('change', () => this.filterCountries());
+
+        document.getElementById('logFilterAction')?.addEventListener('change', () => this.filterLogs());
+        document.getElementById('logFilterResult')?.addEventListener('change', () => this.filterLogs());
+        document.getElementById('logSearchPlayer')?.addEventListener('input', () => this.filterLogs());
     }
 
     startAutoRefresh() {
@@ -74,7 +86,169 @@ class AdminPanel {
         }
     }
 
-    updateGlobalStats(countries) {
+    async loadActionLogs() {
+        try {
+            const snapshot = await this.actionsLogRef.orderByKey().limitToLast(500).once('value');
+            const logs = snapshot.val();
+            
+            if (logs) {
+                this.allLogs = Object.entries(logs).map(([id, log]) => ({
+                    id,
+                    ...log
+                })).reverse(); // Most recent first
+                
+                document.getElementById('totalActions').textContent = this.allLogs.length;
+                this.filterLogs();
+            } else {
+                this.allLogs = [];
+                document.getElementById('totalActions').textContent = '0';
+                this.renderLogs([]);
+            }
+        } catch (error) {
+            console.error('Error loading action logs:', error);
+        }
+    }
+
+    filterLogs() {
+        const actionFilter = document.getElementById('logFilterAction')?.value || 'all';
+        const resultFilter = document.getElementById('logFilterResult')?.value || 'all';
+        const searchPlayer = document.getElementById('logSearchPlayer')?.value.toLowerCase() || '';
+        
+        let filtered = this.allLogs;
+        
+        if (actionFilter !== 'all') {
+            filtered = filtered.filter(log => log.action === actionFilter);
+        }
+        
+        if (resultFilter !== 'all') {
+            filtered = filtered.filter(log => log.result === resultFilter);
+        }
+        
+        if (searchPlayer) {
+            filtered = filtered.filter(log => 
+                log.playerName?.toLowerCase().includes(searchPlayer)
+            );
+        }
+        
+        this.renderLogs(filtered);
+    }
+
+     renderLogs(logs) {
+        const logsContainer = document.getElementById('actionLogsList');
+        if (!logsContainer) return;
+        
+        if (logs.length === 0) {
+            logsContainer.innerHTML = '<div class="log-entry">No action logs found</div>';
+            return;
+        }
+        
+        logsContainer.innerHTML = logs.map(log => {
+            const date = new Date(log.timestamp);
+            const timeString = date.toLocaleString();
+            
+            let resultClass = '';
+            let resultIcon = '';
+            switch(log.result) {
+                case 'success':
+                case 'sent':
+                    resultClass = 'log-result-success';
+                    resultIcon = '✅';
+                    break;
+                case 'failed':
+                    resultClass = 'log-result-failed';
+                    resultIcon = '❌';
+                    break;
+                case 'victory':
+                    resultClass = 'log-result-victory';
+                    resultIcon = '🏆';
+                    break;
+                case 'level_up':
+                    resultClass = 'log-result-levelup';
+                    resultIcon = '⭐';
+                    break;
+                default:
+                    resultClass = 'log-result-info';
+                    resultIcon = 'ℹ️';
+            }
+            
+            let actionIcon = '';
+            switch(log.action) {
+                case 'BUY_SOLDIER': actionIcon = '⚔️'; break;
+                case 'FORTIFY': actionIcon = '🛡️'; break;
+                case 'ATTACK': actionIcon = '🎯'; break;
+                case 'UPGRADE': actionIcon = '📊'; break;
+                case 'TRADE_PROPOSE': actionIcon = '📨'; break;
+                case 'TRADE_ACCEPT': actionIcon = '✅'; break;
+                case 'TRADE_REJECT': actionIcon = '❌'; break;
+                case 'DAILY_RESET': actionIcon = '🌙'; break;
+                default: actionIcon = '📝';
+            }
+            
+            return `
+                <div class="log-entry ${resultClass}">
+                    <div class="log-time">${timeString}</div>
+                    <div class="log-player">
+                        <span class="player-type ${log.playerType}">${log.playerType === 'economic' ? '💰' : '⚔️'}</span>
+                        <strong>${log.playerName}</strong>
+                    </div>
+                    <div class="log-action">
+                        <span class="action-icon">${actionIcon}</span>
+                        <span class="action-name">${log.action.replace('_', ' ')}</span>
+                    </div>
+                    <div class="log-details">${log.details}</div>
+                    <div class="log-result">
+                        <span class="result-icon">${resultIcon}</span>
+                        <span class="result-text">${log.result}</span>
+                    </div>
+                    ${log.targetId ? `<div class="log-target">🎯 Target: ${log.targetId.substring(0, 8)}...</div>` : ''}
+                    <div class="log-stats">
+                        <small>💰 ${log.gold?.toFixed(1) || 0} | ⚔️ ${log.soldiers || 0} | 🎯 ${log.actions || 0} | 📊 Lv.${log.level || 1}</small>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async clearLogs() {
+        if (confirm('⚠️ WARNING: This will delete ALL action logs! Are you sure?')) {
+            if (confirm('LAST CHANCE: This action cannot be undone. Type "CLEAR LOGS" to confirm.')) {
+                const confirmation = prompt('Type "CLEAR LOGS" to confirm:');
+                if (confirmation === 'CLEAR LOGS') {
+                    try {
+                        await this.actionsLogRef.remove();
+                        alert('Action logs have been cleared!');
+                        this.loadActionLogs();
+                    } catch (error) {
+                        console.error('Error clearing logs:', error);
+                        alert('Failed to clear logs. Check console for details.');
+                    }
+                }
+            }
+        }
+    }
+
+    async exportLogs() {
+        if (this.allLogs.length === 0) {
+            alert('No logs to export.');
+            return;
+        }
+        
+        const dataStr = JSON.stringify(this.allLogs, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `action_logs_${new Date().toISOString()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        alert(`Exported ${this.allLogs.length} action logs!`);
+    }
+
+
+
+
+
+     updateGlobalStats(countries) {
         const countriesArray = Object.values(countries);
         const total = countriesArray.length;
         const active = countriesArray.filter(c => c.isAlive !== false).length;

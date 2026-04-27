@@ -11,7 +11,7 @@
     <div class="admin-container">
         <!-- Header -->
         <header>
-            <h1>> ADMIN CONTROL PANEL v1.0 <</h1>
+            <h1>> ADMIN CONTROL PANEL v2.0 <</h1>
             <div class="admin-stats">
                 <span>🟢 LIVE MONITORING</span>
                 <span id="lastUpdate">Last update: --:--:--</span>
@@ -56,6 +56,10 @@
                         <span class="stat-label">Active Trades:</span>
                         <span class="stat-value" id="activeTrades">0</span>
                     </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Total Actions Logged:</span>
+                        <span class="stat-value" id="totalActions">0</span>
+                    </div>
                 </div>
 
                 <div class="admin-actions">
@@ -64,6 +68,7 @@
                     <button id="resetGame" class="admin-btn danger">⚠ RESET GAME</button>
                     <button id="clearDefeated" class="admin-btn">🗑 CLEAR DEFEATED</button>
                     <button id="exportData" class="admin-btn">📊 EXPORT DATA</button>
+                    <button id="clearLogs" class="admin-btn">🗑 CLEAR ACTION LOGS</button>
                 </div>
             </div>
 
@@ -97,6 +102,40 @@
                         <!-- Countries will be listed here -->
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Action Log Monitor -->
+        <div class="action-log-monitor">
+            <div class="log-header">
+                <h3>> ACTION LOG MONITOR <</h3>
+                <div class="log-controls">
+                    <select id="logFilterAction">
+                        <option value="all">All Actions</option>
+                        <option value="BUY_SOLDIER">Buy Soldier</option>
+                        <option value="FORTIFY">Fortify</option>
+                        <option value="ATTACK">Attack</option>
+                        <option value="UPGRADE">Upgrade</option>
+                        <option value="TRADE_PROPOSE">Trade Propose</option>
+                        <option value="TRADE_ACCEPT">Trade Accept</option>
+                        <option value="TRADE_REJECT">Trade Reject</option>
+                        <option value="DAILY_RESET">Daily Reset</option>
+                    </select>
+                    <select id="logFilterResult">
+                        <option value="all">All Results</option>
+                        <option value="success">Success</option>
+                        <option value="failed">Failed</option>
+                        <option value="victory">Victory</option>
+                        <option value="level_up">Level Up</option>
+                        <option value="sent">Sent</option>
+                    </select>
+                    <input type="text" id="logSearchPlayer" placeholder="Search by player name...">
+                    <button id="refreshLogs" class="log-btn">⟳ Refresh</button>
+                    <button id="exportLogs" class="log-btn">📥 Export Logs</button>
+                </div>
+            </div>
+            <div id="actionLogsList" class="action-logs-list">
+                <!-- Action logs will be displayed here -->
             </div>
         </div>
 
