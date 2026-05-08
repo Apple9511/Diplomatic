@@ -8,6 +8,7 @@ class Game {
         this.tradeListeners = [];
         this.gameActive = true;
         this.winnerDeclared = false;
+        this.currentUpgradePointsBefore = 0; // Track for animation
         
         if (typeof database !== 'undefined' && database) {
             this.initializeGame();
@@ -259,46 +260,38 @@ class Game {
     }
 
     async performDailyUpdate(countryId, country) {
-        const updates = {};
-        
-        let goldEarned = GAME_CONFIG.BASE_GOLD_PER_DAY;
-        let actionsEarned = GAME_CONFIG.BASE_ACTIONS_PER_DAY;
-        
-        // Economic bonus
-        if (country.type === 'economic' && country.level > 1) {
-            for (let i = 2; i <= country.level; i++) {
-                if (GAME_CONFIG.ECONOMIC_BONUSES[i]?.goldPerDay) {
-                    goldEarned += GAME_CONFIG.ECONOMIC_BONUSES[i].goldPerDay;
-                }
-            }
-        }
-        
-        // Wartime bonus for actions
-        if (country.type === 'wartime' && country.level >= 2) {
-            actionsEarned += 0.5;
-        }
-        
-        const newGold = (country.gold || 0) + goldEarned;
-        const newActions = (country.actions || 0) + actionsEarned;
-        
-        const now = Date.now();
-        const nowDate = new Date(now);
-        
-        updates.gold = newGold;
-        updates.actions = newActions;
-        updates.lastDailyUpdate = firebase.database.ServerValue.TIMESTAMP;
-        updates.lastDailyReset = now;
-        updates.lastResetDay = nowDate.getDate();
-        
-        await countriesRef.child(countryId).update(updates);
-        
-        console.log(`Daily reset complete for ${country.name}: +${goldEarned} gold, +${actionsEarned} actions`);
-        
-        // Show notification to current player if this is their country
-        if (countryId === this.currentPlayerId && this.gameActive) {
-            this.showMessage(`🌙 Daily Reset! +${goldEarned} gold, +${actionsEarned} actions!`, 'success');
-        }
+    const updates = {};
+    
+    let goldEarned = GAME_CONFIG.BASE_GOLD_PER_DAY;
+    let actionsEarned = GAME_CONFIG.BASE_ACTIONS_PER_DAY;
+    
+    // Economic bonus - now 0.5 per level above 1
+    if (country.type === 'economic' && country.level > 1) {
+        // Level 2: +0.5, Level 3: +1.0, Level 4: +1.5
+        goldEarned += (country.level - 1) * 0.5;
     }
+    
+    const newGold = (country.gold || 0) + goldEarned;
+    const newActions = (country.actions || 0) + actionsEarned;
+    
+    const now = Date.now();
+    const nowDate = new Date(now);
+    
+    updates.gold = newGold;
+    updates.actions = newActions;
+    updates.lastDailyUpdate = firebase.database.ServerValue.TIMESTAMP;
+    updates.lastDailyReset = now;
+    updates.lastResetDay = nowDate.getDate();
+    
+    await countriesRef.child(countryId).update(updates);
+    
+    console.log(`Daily reset complete for ${country.name}: +${goldEarned} gold, +${actionsEarned} actions`);
+    
+    // Show notification to current player if this is their country
+    if (countryId === this.currentPlayerId && this.gameActive) {
+        this.showMessage(`🌙 Daily Reset! +${goldEarned} gold, +${actionsEarned} actions!`, 'success');
+    }
+}
 
     async buySoldier() {
     if (!this.currentPlayerId || !this.gameActive) return;
@@ -317,8 +310,9 @@ class Game {
         soldierCost = 1 + country.level;
     }
     
+    // Wartime level 3: Soldiers cost 1 gold
     if (country.type === 'wartime' && country.level >= 3) {
-        soldierCost = 1.5;
+        soldierCost = 1;
     }
     
     if (country.gold >= soldierCost) {
@@ -338,68 +332,67 @@ class Game {
     }
 }
 
-
-   async fortify(targetId = null) {
-    if (!this.currentPlayerId || !this.gameActive) return;
-    
-    const target = targetId || this.currentPlayerId;
-    const snapshot = await countriesRef.child(target).once('value');
-    const country = snapshot.val();
-    
-    if (!country || (target !== this.currentPlayerId && country.isAlive === false)) {
-        this.showMessage('Target country is not active!', 'failure');
-        return;
-    }
-    
-    if (target !== this.currentPlayerId) {
-        const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const player = playerSnapshot.val();
-        if (!player.neighbors || !player.neighbors.includes(target)) {
-            this.showMessage('You can only heal neighboring countries!', 'failure');
-            await this.logAction('FORTIFY', `Attempted to heal non-neighbor ${country.name}`, target, 'failed - not neighbor');
-            return;
-        }
-    }
-    
-    if (target === this.currentPlayerId) {
-        const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const player = playerSnapshot.val();
+    async fortify(targetId = null) {
+        if (!this.currentPlayerId || !this.gameActive) return;
         
-        if (player.actions < 1) {
-            this.showMessage('Not enough actions!', 'failure');
-            await this.logAction('FORTIFY', 'Attempted to fortify with 0 actions', null, 'failed - no actions');
+        const target = targetId || this.currentPlayerId;
+        const snapshot = await countriesRef.child(target).once('value');
+        const country = snapshot.val();
+        
+        if (!country || (target !== this.currentPlayerId && country.isAlive === false)) {
+            this.showMessage('Target country is not active!', 'failure');
             return;
         }
         
-        let goldCost = 0;
-        if (player.type === 'economic' && player.level >= 4) {
-            goldCost = 2;
-            if (player.gold < goldCost) {
-                this.showMessage(`Not enough gold! Need ${goldCost} gold to fortify.`, 'failure');
-                await this.logAction('FORTIFY', `Attempted to fortify but only had ${player.gold} gold`, null, 'failed - insufficient gold');
+        if (target !== this.currentPlayerId) {
+            const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+            const player = playerSnapshot.val();
+            if (!player.neighbors || !player.neighbors.includes(target)) {
+                this.showMessage('You can only heal neighboring countries!', 'failure');
+                await this.logAction('FORTIFY', `Attempted to heal non-neighbor ${country.name}`, target, 'failed - not neighbor');
                 return;
             }
         }
         
-        if (country.lives < GAME_CONFIG.MAX_LIVES) {
-            const updates = {
-                lives: Math.min(country.lives + 1, GAME_CONFIG.MAX_LIVES),
-                actions: player.actions - 1
-            };
+        if (target === this.currentPlayerId) {
+            const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+            const player = playerSnapshot.val();
             
-            if (goldCost > 0) {
-                updates.gold = player.gold - goldCost;
+            if (player.actions < 1) {
+                this.showMessage('Not enough actions!', 'failure');
+                await this.logAction('FORTIFY', 'Attempted to fortify with 0 actions', null, 'failed - no actions');
+                return;
             }
             
-            await countriesRef.child(this.currentPlayerId).update(updates);
-            this.showMessage('Fortification successful! +1 Life', 'success');
-            await this.logAction('FORTIFY', `Increased lives from ${country.lives} to ${country.lives + 1}`, null, 'success');
-        } else {
-            this.showMessage('Already at maximum lives!', 'failure');
-            await this.logAction('FORTIFY', `Attempted to fortify but already at max lives (${country.lives}/${GAME_CONFIG.MAX_LIVES})`, null, 'failed - max lives');
+            let goldCost = 0;
+            if (player.type === 'economic' && player.level >= 4) {
+                goldCost = 2;
+                if (player.gold < goldCost) {
+                    this.showMessage(`Not enough gold! Need ${goldCost} gold to fortify.`, 'failure');
+                    await this.logAction('FORTIFY', `Attempted to fortify but only had ${player.gold} gold`, null, 'failed - insufficient gold');
+                    return;
+                }
+            }
+            
+            if (country.lives < GAME_CONFIG.MAX_LIVES) {
+                const updates = {
+                    lives: Math.min(country.lives + 1, GAME_CONFIG.MAX_LIVES),
+                    actions: player.actions - 1
+                };
+                
+                if (goldCost > 0) {
+                    updates.gold = player.gold - goldCost;
+                }
+                
+                await countriesRef.child(this.currentPlayerId).update(updates);
+                this.showMessage('Fortification successful! +1 Life', 'success');
+                await this.logAction('FORTIFY', `Increased lives from ${country.lives} to ${country.lives + 1}`, null, 'success');
+            } else {
+                this.showMessage('Already at maximum lives!', 'failure');
+                await this.logAction('FORTIFY', `Attempted to fortify but already at max lives (${country.lives}/${GAME_CONFIG.MAX_LIVES})`, null, 'failed - max lives');
+            }
         }
     }
-}
 
     async attack(neighborId) {
     if (!this.currentPlayerId || !this.gameActive) return;
@@ -438,17 +431,24 @@ class Game {
         return;
     }
     
-    let attackSuccess = Math.random() < 0.5;
-    let rerollUsed = false;
+    // Wartime level 2: Flip 2 coins
+    let attackSuccess = false;
+    let successes = 0;
+    let message = '';
     
-    if (!attackSuccess && attacker.type === 'wartime' && attacker.level >= 2) {
-        if (attacker.gold >= 2) {
-            if (confirm('Attack failed! Spend 2 gold to reroll?')) {
-                attackSuccess = Math.random() < 0.5;
-                rerollUsed = true;
-                await countriesRef.child(this.currentPlayerId).child('gold').set(attacker.gold - 2);
-            }
-        }
+    if (attacker.type === 'wartime' && attacker.level >= 2) {
+        // Flip 2 coins, need at least 1 success
+        const coin1 = Math.random() < 0.5;
+        const coin2 = Math.random() < 0.5;
+        successes = (coin1 ? 1 : 0) + (coin2 ? 1 : 0);
+        attackSuccess = successes >= 1;
+        message = `🎲 Coin flips: ${coin1 ? 'H' : 'T'}, ${coin2 ? 'H' : 'T'} (${successes} success${successes !== 1 ? 'es' : ''}) - ${attackSuccess ? 'Hit!' : 'Miss!'}`;
+        this.showMessage(message, attackSuccess ? 'info' : 'failure');
+    } else {
+        // Normal attack: 50% chance
+        attackSuccess = Math.random() < 0.5;
+        message = attackSuccess ? 'Attack successful!' : 'Attack failed!';
+        this.showMessage(message, attackSuccess ? 'success' : 'failure');
     }
     
     const updates = {
@@ -471,19 +471,19 @@ class Game {
             updates.gold = (attacker.gold || 0) + 5;
             this.showMessage(`+5 Gold reward for victory!`, 'success');
             
-            await this.logAction('ATTACK', `Defeated ${defender.name} and conquered their territory${rerollUsed ? ' (used reroll)' : ''}`, neighborId, 'victory');
+            await this.logAction('ATTACK', `Defeated ${defender.name} and conquered their territory (${successes} successes)`, neighborId, 'victory');
             
             await this.checkPlayerElimination(neighborId);
         } else {
             updates.gold = (attacker.gold || 0) + 1;
             this.showMessage('Attack successful! Stole 1 gold!', 'success');
-            await this.logAction('ATTACK', `Successfully attacked ${defender.name}, stole 1 gold, dealt 1 damage${rerollUsed ? ' (used reroll)' : ''}`, neighborId, 'success');
+            await this.logAction('ATTACK', `Successfully attacked ${defender.name}, stole 1 gold, dealt 1 damage (${successes} successes)`, neighborId, 'success');
         }
         
         await countriesRef.child(neighborId).update(defenderUpdates);
     } else {
-        this.showMessage('Attack failed!', 'failure');
-        await this.logAction('ATTACK', `Failed to attack ${defender.name}${rerollUsed ? ' (reroll also failed)' : ''}`, neighborId, 'failed');
+        this.showMessage(`Attack failed! (${successes}/2 successes)`, 'failure');
+        await this.logAction('ATTACK', `Failed to attack ${defender.name} (${successes}/2 successes)`, neighborId, 'failed');
     }
     
     await countriesRef.child(this.currentPlayerId).update(updates);
@@ -656,135 +656,287 @@ class Game {
         window.location.reload();
     }
 
-    async upgrade() {
-    if (!this.currentPlayerId || !this.gameActive) return;
-    
-    const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
-    const country = snapshot.val();
-    
-    if (!country || country.isAlive === false) {
-        this.showMessage('Your country is no longer active!', 'failure');
-        return;
+    // Update the upgrade progress visualization
+    updateUpgradeProgress() {
+        if (!this.currentPlayerId || !this.gameActive) return;
+        
+        countriesRef.child(this.currentPlayerId).once('value', (snapshot) => {
+            const country = snapshot.val();
+            if (!country) return;
+            
+            const currentPoints = country.upgradePoints || 0;
+            const currentLevel = country.level;
+            const nextLevel = currentLevel + 1;
+            
+            let requiredPoints = 0;
+            
+            if (nextLevel <= 4) {
+                requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[nextLevel];
+            } else {
+                requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[4] || 5;
+            }
+            
+            // Update progress text
+            const progressText = document.getElementById('progressText');
+            if (progressText) {
+                progressText.textContent = `${currentPoints}/${requiredPoints}`;
+            }
+            
+            // Generate squares
+            const squaresContainer = document.getElementById('upgradeProgressSquares');
+            if (squaresContainer) {
+                squaresContainer.innerHTML = '';
+                
+                for (let i = 0; i < requiredPoints; i++) {
+                    const square = document.createElement('div');
+                    square.className = 'progress-square';
+                    if (i < currentPoints) {
+                        square.classList.add('filled');
+                        if (i === currentPoints - 1 && this.currentUpgradePointsBefore < currentPoints) {
+                            square.classList.add('pulse-animation');
+                            setTimeout(() => square.classList.remove('pulse-animation'), 500);
+                        }
+                    }
+                    squaresContainer.appendChild(square);
+                }
+            }
+            
+            this.currentUpgradePointsBefore = currentPoints;
+        });
     }
-    
-    if (country.actions < 1) {
-        this.showMessage('Not enough actions!', 'failure');
-        await this.logAction('UPGRADE', 'Attempted to upgrade with 0 actions', null, 'failed - no actions');
-        return;
-    }
-    
-    if (country.level >= 4) {
-        this.showMessage('Already at maximum level!', 'failure');
-        await this.logAction('UPGRADE', `Attempted to upgrade but already at max level ${country.level}`, null, 'failed - max level');
-        return;
-    }
-    
-    const newUpgradePoints = (country.upgradePoints || 0) + 1;
-    const nextLevel = country.level + 1;
-    const requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[nextLevel];
-    
-    const updates = {
-        actions: country.actions - 1,
-        upgradePoints: newUpgradePoints
+
+    // Get level rewards with numerical labels only
+getLevelRewards(level, countryType) {
+    const rewards = {
+        economic: {
+            level2: { bonus: "+5 Gold/day" },
+            level3: { bonus: "+10 Gold/day" },
+            level4: { bonus: "+15 Gold/day" }
+        },
+        wartime: {
+            level2: { bonus: "Flip 2 coins when attacking" },
+            level3: { bonus: "Soldiers only cost 1 gold" },
+            level4: { bonus: "Convert 3 gold into 1 AP" }
+        }
     };
     
-    let leveledUp = false;
-    if (newUpgradePoints >= requiredPoints) {
-        updates.level = nextLevel;
-        updates.upgradePoints = newUpgradePoints - requiredPoints;
-        leveledUp = true;
-        this.showMessage(`Level Up! Now level ${nextLevel}!`, 'success');
-    }
-    
-    await countriesRef.child(this.currentPlayerId).update(updates);
-    
-    if (leveledUp) {
-        await this.logAction('UPGRADE', `Upgraded from level ${country.level} to ${nextLevel} (${newUpgradePoints}/${requiredPoints} points)`, null, 'level_up');
-    } else {
-        await this.logAction('UPGRADE', `Gained 1 upgrade point (${newUpgradePoints}/${requiredPoints} for next level)`, null, 'progress');
+    switch(level) {
+        case 2:
+            return countryType === 'economic' ? 
+                { bonus: rewards.economic.level2.bonus, level: 2 } : 
+                { bonus: rewards.wartime.level2.bonus, level: 2 };
+        case 3:
+            return countryType === 'economic' ? 
+                { bonus: rewards.economic.level3.bonus, level: 3 } : 
+                { bonus: rewards.wartime.level3.bonus, level: 3 };
+        case 4:
+            return countryType === 'economic' ? 
+                { bonus: rewards.economic.level4.bonus, level: 4 } : 
+                { bonus: rewards.wartime.level4.bonus, level: 4 };
+        default:
+            return { bonus: "MAX LEVEL", level: level };
     }
 }
 
-
-    async proposeTrade(tradeData) {
-    if (!this.currentPlayerId || !this.gameActive) {
-        this.showMessage('Game is not active!', 'failure');
-        return;
-    }
-    
-    try {
-        const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const player = snapshot.val();
+    // Show level info panel (simple, non-popup)
+    showLevelInfo() {
+        if (!this.currentPlayerId) return;
         
-        if (!player || player.isAlive === false) {
-            this.showMessage('Your country is not active!', 'failure');
-            return;
-        }
-        
-        if (player.gold < tradeData.gold) {
-            this.showMessage(`You don't have ${tradeData.gold} gold!`, 'failure');
-            await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.gold} gold but only had ${player.gold}`, tradeData.partnerId, 'failed - insufficient gold');
-            return;
-        }
-        
-        if (player.soldiers < tradeData.soldiers) {
-            this.showMessage(`You don't have ${tradeData.soldiers} soldiers!`, 'failure');
-            await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.soldiers} soldiers but only had ${player.soldiers}`, tradeData.partnerId, 'failed - insufficient soldiers');
-            return;
-        }
-        
-        if (tradeData.actions > 0) {
-            if (!player.neighbors || !player.neighbors.includes(tradeData.partnerId)) {
-                this.showMessage('Actions can only be traded with neighboring countries!', 'failure');
-                await this.logAction('TRADE_PROPOSE', `Attempted to trade actions with non-neighbor`, tradeData.partnerId, 'failed - not neighbor');
-                return;
+        countriesRef.child(this.currentPlayerId).once('value', (snapshot) => {
+            const country = snapshot.val();
+            if (!country) return;
+            
+            const panel = document.getElementById('levelInfoPanel');
+            const rewardsInfo = document.getElementById('levelRewardsInfo');
+            
+            if (!panel || !rewardsInfo) return;
+            
+            const nextLevel = country.level + 1;
+            const currentPoints = country.upgradePoints || 0;
+            const requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[nextLevel] || 5;
+            
+            let rewardsHtml = '';
+            
+            if (nextLevel <= 4) {
+                const rewards = this.getLevelRewards(nextLevel, country.type);
+                rewardsHtml = `
+                    <div class="reward-card ${country.type}">
+                        <div class="reward-level">LEVEL ${nextLevel}</div>
+                        <div class="reward-bonus">${rewards.bonus}</div>
+                        <div class="progress-preview">
+                            <div class="preview-bar">
+                                <div class="preview-fill" style="width: ${(currentPoints / requiredPoints) * 100}%"></div>
+                            </div>
+                            <div class="preview-text">${currentPoints}/${requiredPoints} points needed</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                rewardsHtml = `
+                    <div class="reward-card max-level">
+                        <div class="reward-level">MAX LEVEL</div>
+                    </div>
+                `;
             }
             
-            if (player.actions < tradeData.actions) {
-                this.showMessage(`You don't have ${tradeData.actions} actions!`, 'failure');
-                await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.actions} actions but only had ${player.actions}`, tradeData.partnerId, 'failed - insufficient actions');
-                return;
+            rewardsInfo.innerHTML = rewardsHtml;
+            panel.classList.remove('hidden');
+        });
+    }
+
+    // Hide level info panel
+    hideLevelInfo() {
+        const panel = document.getElementById('levelInfoPanel');
+        if (panel) {
+            panel.classList.add('hidden');
+        }
+    }
+
+    // Toggle level info panel
+    toggleLevelInfo() {
+        const panel = document.getElementById('levelInfoPanel');
+        if (panel) {
+            if (panel.classList.contains('hidden')) {
+                this.showLevelInfo();
+            } else {
+                this.hideLevelInfo();
             }
         }
+    }
+
+    async upgrade() {
+        if (!this.currentPlayerId || !this.gameActive) return;
         
-        const tradeRef = tradesRef.push();
-        const trade = {
-            id: tradeRef.key,
-            fromId: this.currentPlayerId,
-            fromName: player.name,
-            toId: tradeData.partnerId,
-            gold: parseInt(tradeData.gold) || 0,
-            soldiers: parseInt(tradeData.soldiers) || 0,
-            actions: parseInt(tradeData.actions) || 0,
-            status: 'pending',
-            createdAt: firebase.database.ServerValue.TIMESTAMP,
-            expiresAt: Date.now() + (24 * 60 * 60 * 1000)
-        };
+        const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
+        const country = snapshot.val();
+        
+        if (!country || country.isAlive === false) {
+            this.showMessage('Your country is no longer active!', 'failure');
+            return;
+        }
+        
+        if (country.actions < 1) {
+            this.showMessage('Not enough actions!', 'failure');
+            await this.logAction('UPGRADE', 'Attempted to upgrade with 0 actions', null, 'failed - no actions');
+            return;
+        }
+        
+        if (country.level >= 4) {
+            this.showMessage('Already at maximum level!', 'failure');
+            await this.logAction('UPGRADE', `Attempted to upgrade but already at max level ${country.level}`, null, 'failed - max level');
+            return;
+        }
+        
+        const newUpgradePoints = (country.upgradePoints || 0) + 1;
+        const nextLevel = country.level + 1;
+        const requiredPoints = GAME_CONFIG.UPGRADE_REQUIREMENTS[nextLevel];
         
         const updates = {
-            gold: player.gold - trade.gold,
-            soldiers: player.soldiers - trade.soldiers
+            actions: country.actions - 1,
+            upgradePoints: newUpgradePoints
         };
         
-        if (trade.actions > 0) {
-            updates.actions = player.actions - trade.actions;
+        let leveledUp = false;
+        if (newUpgradePoints >= requiredPoints) {
+            updates.level = nextLevel;
+            updates.upgradePoints = newUpgradePoints - requiredPoints;
+            leveledUp = true;
+            this.showMessage(`Level ${nextLevel}!`, 'success');
+        } else {
+            this.showMessage(`+1 Point (${newUpgradePoints}/${requiredPoints})`, 'info');
         }
         
         await countriesRef.child(this.currentPlayerId).update(updates);
-        await tradeRef.set(trade);
         
-        this.showMessage(`Trade proposal sent!`, 'success');
-        await this.logAction('TRADE_PROPOSE', `Proposed trade: ${trade.gold} gold, ${trade.soldiers} soldiers, ${trade.actions} actions`, tradeData.partnerId, 'sent');
+        // Update the progress visualization
+        this.updateUpgradeProgress();
         
-        document.getElementById('tradeGold').value = '';
-        document.getElementById('tradeSoldiers').value = '';
-        document.getElementById('tradeActions').value = '';
-        
-    } catch (error) {
-        console.error('Error proposing trade:', error);
-        this.showMessage('Failed to propose trade', 'failure');
+        if (leveledUp) {
+            await this.logAction('UPGRADE', `Upgraded from level ${country.level} to ${nextLevel}`, null, 'level_up');
+        } else {
+            await this.logAction('UPGRADE', `Gained 1 upgrade point (${newUpgradePoints}/${requiredPoints})`, null, 'progress');
+        }
     }
-}
+
+    async proposeTrade(tradeData) {
+        if (!this.currentPlayerId || !this.gameActive) {
+            this.showMessage('Game is not active!', 'failure');
+            return;
+        }
+        
+        try {
+            const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
+            const player = snapshot.val();
+            
+            if (!player || player.isAlive === false) {
+                this.showMessage('Your country is not active!', 'failure');
+                return;
+            }
+            
+            if (player.gold < tradeData.gold) {
+                this.showMessage(`You don't have ${tradeData.gold} gold!`, 'failure');
+                await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.gold} gold but only had ${player.gold}`, tradeData.partnerId, 'failed - insufficient gold');
+                return;
+            }
+            
+            if (player.soldiers < tradeData.soldiers) {
+                this.showMessage(`You don't have ${tradeData.soldiers} soldiers!`, 'failure');
+                await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.soldiers} soldiers but only had ${player.soldiers}`, tradeData.partnerId, 'failed - insufficient soldiers');
+                return;
+            }
+            
+            if (tradeData.actions > 0) {
+                if (!player.neighbors || !player.neighbors.includes(tradeData.partnerId)) {
+                    this.showMessage('Actions can only be traded with neighboring countries!', 'failure');
+                    await this.logAction('TRADE_PROPOSE', `Attempted to trade actions with non-neighbor`, tradeData.partnerId, 'failed - not neighbor');
+                    return;
+                }
+                
+                if (player.actions < tradeData.actions) {
+                    this.showMessage(`You don't have ${tradeData.actions} actions!`, 'failure');
+                    await this.logAction('TRADE_PROPOSE', `Attempted to trade ${tradeData.actions} actions but only had ${player.actions}`, tradeData.partnerId, 'failed - insufficient actions');
+                    return;
+                }
+            }
+            
+            const tradeRef = tradesRef.push();
+            const trade = {
+                id: tradeRef.key,
+                fromId: this.currentPlayerId,
+                fromName: player.name,
+                toId: tradeData.partnerId,
+                gold: parseInt(tradeData.gold) || 0,
+                soldiers: parseInt(tradeData.soldiers) || 0,
+                actions: parseInt(tradeData.actions) || 0,
+                status: 'pending',
+                createdAt: firebase.database.ServerValue.TIMESTAMP,
+                expiresAt: Date.now() + (24 * 60 * 60 * 1000)
+            };
+            
+            const updates = {
+                gold: player.gold - trade.gold,
+                soldiers: player.soldiers - trade.soldiers
+            };
+            
+            if (trade.actions > 0) {
+                updates.actions = player.actions - trade.actions;
+            }
+            
+            await countriesRef.child(this.currentPlayerId).update(updates);
+            await tradeRef.set(trade);
+            
+            this.showMessage(`Trade proposal sent!`, 'success');
+            await this.logAction('TRADE_PROPOSE', `Proposed trade: ${trade.gold} gold, ${trade.soldiers} soldiers, ${trade.actions} actions`, tradeData.partnerId, 'sent');
+            
+            document.getElementById('tradeGold').value = '';
+            document.getElementById('tradeSoldiers').value = '';
+            document.getElementById('tradeActions').value = '';
+            
+        } catch (error) {
+            console.error('Error proposing trade:', error);
+            this.showMessage('Failed to propose trade', 'failure');
+        }
+    }
 
     async rejectTrade(tradeId) {
         if (!this.gameActive) return;
@@ -1031,6 +1183,7 @@ class Game {
                         document.getElementById('playerDashboard').classList.remove('hidden');
                         this.updatePlayerUI(this.currentPlayer);
                         this.updateNeighborSelectors();
+                        this.updateUpgradeProgress(); // Initialize progress bars
                     } else {
                         localStorage.removeItem('playerId');
                         this.showDefeatScreen('Your previous country was defeated. Start a new game!');
@@ -1043,15 +1196,33 @@ class Game {
     }
 
     updatePlayerUI(country) {
-        document.getElementById('displayCountryName').textContent = country.name;
-        document.getElementById('countryType').textContent = country.type;
-        document.getElementById('lives').textContent = country.lives;
-        document.getElementById('gold').textContent = country.gold?.toFixed(1) || '0';
-        document.getElementById('soldiers').textContent = country.soldiers || '0';
-        document.getElementById('actions').textContent = country.actions || '0';
-        document.getElementById('level').textContent = country.level;
-        document.getElementById('upgradePoints').textContent = country.upgradePoints || '0';
+    document.getElementById('displayCountryName').textContent = country.name;
+    document.getElementById('countryType').textContent = country.type;
+    document.getElementById('lives').textContent = country.lives;
+    document.getElementById('gold').textContent = country.gold?.toFixed(1) || '0';
+    document.getElementById('soldiers').textContent = country.soldiers || '0';
+    document.getElementById('actions').textContent = country.actions || '0';
+    document.getElementById('level').textContent = country.level;
+    document.getElementById('upgradePoints').textContent = country.upgradePoints || '0';
+    
+    // Add class to dashboard for country type
+    const dashboard = document.getElementById('playerDashboard');
+    if (dashboard) {
+        dashboard.classList.remove('country-type-economic', 'country-type-wartime');
+        dashboard.classList.add(`country-type-${country.type}`);
+        
+        // Show/hide wartime button based on level
+        const convertBtn = document.getElementById('convertGoldToAP');
+        if (convertBtn && country.type === 'wartime' && country.level >= 4) {
+            convertBtn.style.display = 'inline-block';
+        } else if (convertBtn) {
+            convertBtn.style.display = 'none';
+        }
     }
+    
+    // Update progress visualization
+    this.updateUpgradeProgress();
+}
 
     updateCountdown() {
         const now = new Date();
@@ -1314,47 +1485,47 @@ class Game {
     }
 
     async logAction(actionType, details, targetId = null, result = null) {
-    if (!this.currentPlayerId) return;
-    
-    try {
-        const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-        const player = playerSnapshot.val();
+        if (!this.currentPlayerId) return;
         
-        if (!player) return;
-        
-        const logEntry = {
-            timestamp: firebase.database.ServerValue.TIMESTAMP,
-            playerId: this.currentPlayerId,
-            playerName: player.name,
-            playerType: player.type,
-            action: actionType,
-            details: details,
-            targetId: targetId,
-            result: result,
-            gold: player.gold || 0,
-            soldiers: player.soldiers || 0,
-            actions: player.actions || 0,
-            level: player.level || 1
-        };
-        
-        await actionsLogRef.push().set(logEntry);
-        
-        // Keep only last 1000 logs to prevent database bloat
-        const logsSnapshot = await actionsLogRef.orderByKey().limitToLast(1000).once('value');
-        const logs = logsSnapshot.val();
-        if (logs) {
-            const logKeys = Object.keys(logs);
-            if (logKeys.length > 1000) {
-                const toDelete = logKeys.slice(0, logKeys.length - 1000);
-                for (const key of toDelete) {
-                    await actionsLogRef.child(key).remove();
+        try {
+            const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+            const player = playerSnapshot.val();
+            
+            if (!player) return;
+            
+            const logEntry = {
+                timestamp: firebase.database.ServerValue.TIMESTAMP,
+                playerId: this.currentPlayerId,
+                playerName: player.name,
+                playerType: player.type,
+                action: actionType,
+                details: details,
+                targetId: targetId,
+                result: result,
+                gold: player.gold || 0,
+                soldiers: player.soldiers || 0,
+                actions: player.actions || 0,
+                level: player.level || 1
+            };
+            
+            await actionsLogRef.push().set(logEntry);
+            
+            // Keep only last 1000 logs to prevent database bloat
+            const logsSnapshot = await actionsLogRef.orderByKey().limitToLast(1000).once('value');
+            const logs = logsSnapshot.val();
+            if (logs) {
+                const logKeys = Object.keys(logs);
+                if (logKeys.length > 1000) {
+                    const toDelete = logKeys.slice(0, logKeys.length - 1000);
+                    for (const key of toDelete) {
+                        await actionsLogRef.child(key).remove();
+                    }
                 }
             }
+        } catch (error) {
+            console.error('Error logging action:', error);
         }
-    } catch (error) {
-        console.error('Error logging action:', error);
     }
-}
 
     async updateNeighborSelectors() {
         if (!this.currentPlayerId) return;
@@ -1456,7 +1627,43 @@ class Game {
     updateGameTime(gameState) {
         // Implement if needed
     }
+
+    // Add this method to the Game class (around line 600-650)
+async convertGoldToAP() {
+    if (!this.currentPlayerId || !this.gameActive) return;
+    
+    const snapshot = await countriesRef.child(this.currentPlayerId).once('value');
+    const country = snapshot.val();
+    
+    if (!country || country.isAlive === false) {
+        this.showMessage('Your country is no longer active!', 'failure');
+        return;
+    }
+    
+    // Check if wartime level 4
+    if (country.type !== 'wartime' || country.level < 4) {
+        this.showMessage('This ability is only available for Wartime countries at level 4!', 'failure');
+        return;
+    }
+    
+    const conversionCost = 3;
+    
+    if (country.gold >= conversionCost) {
+        const updates = {
+            gold: country.gold - conversionCost,
+            actions: (country.actions || 0) + 1
+        };
+        
+        await countriesRef.child(this.currentPlayerId).update(updates);
+        this.showMessage(`Converted 3 gold into 1 Action Point!`, 'success');
+        await this.logAction('CONVERT_GOLD_TO_AP', `Converted 3 gold to 1 AP`, null, 'success');
+    } else {
+        this.showMessage(`Not enough gold! Need ${conversionCost} gold to convert to AP.`, 'failure');
+        await this.logAction('CONVERT_GOLD_TO_AP', `Attempted to convert but only had ${country.gold} gold`, null, 'failed - insufficient gold');
+    }
 }
+}
+
 
 // Create and expose game instance AFTER the class definition
 document.addEventListener('DOMContentLoaded', () => {

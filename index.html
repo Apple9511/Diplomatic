@@ -53,6 +53,15 @@
                         <div class="resource">LEVEL: <span id="level">1</span></div>
                         <div class="resource">UPGRADE PTS: <span id="upgradePoints">0</span></div>
                     </div>
+                    
+                    <!-- Upgrade Progress Bar -->
+                    <div class="upgrade-progress-container">
+                        <div class="progress-label">NEXT LEVEL PROGRESS</div>
+                        <div class="progress-squares" id="upgradeProgressSquares">
+                            <!-- Squares will be generated dynamically -->
+                        </div>
+                        <div class="progress-text" id="progressText">0/0 Upgrade Points</div>
+                    </div>
                 </div>
 
                 <!-- Action Buttons -->
@@ -61,6 +70,7 @@
                     <button id="fortify" class="action-btn">> FORTIFY <</button>
                     <button id="healNeighbor" class="action-btn">> HEAL ALLY <</button>
                     <button id="upgrade" class="action-btn">> RESEARCH <</button>
+                    <button id="convertGoldToAP" class="action-btn wartime-only">> CONVERT 3G → 1AP <</button>
                 </div>
 
                 <!-- Attack Panel -->
@@ -95,7 +105,7 @@
                 <div id="myTradeOffers" class="my-trade-offers hidden">
                     <h4>My Pending Offers</h4>
                     <div id="myPendingTrades"></div>
-                </div> <!-- Fixed: Added missing closing div -->
+                </div>
                 
                 <!-- Game Map - Enhanced Tactical Map -->
                 <div class="game-map">
@@ -107,9 +117,26 @@
                     <div id="mapContainer" class="map-container">
                         <!-- Map will be populated dynamically -->
                     </div>
-            </div> <!-- Closing playerDashboard div -->
+                </div>
+            </div> <!-- Closing playerDashboard -->
         </main>
-    </div> <!-- Closing game-container div -->
+    </div> <!-- Closing game-container -->
+
+    <!-- Level Info Panel -->
+    <div id="levelInfoPanel" class="level-info-panel hidden">
+        <div class="level-info-content">
+            <div class="level-info-header">
+                <h3>> NEXT LEVEL REWARDS <</h3>
+                <button id="closeInfoBtn" class="close-info">✕</button>
+            </div>
+            <div id="levelRewardsInfo" class="level-rewards-info">
+                <!-- Rewards will be populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Simple toggle button -->
+    <button id="toggleLevelInfoBtn" class="info-toggle-btn">📊 LEVEL INFO</button>
 
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>

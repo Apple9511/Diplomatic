@@ -30,6 +30,15 @@ function initializeUI() {
             await window.game.createCountry(countryData);
         });
     }
+
+    // Convert Gold to AP button (Wartime level 4 ability)
+const convertGoldToAPBtn = document.getElementById('convertGoldToAP');
+if (convertGoldToAPBtn) {
+    convertGoldToAPBtn.addEventListener('click', () => {
+        if (window.game) window.game.convertGoldToAP();
+        else alert('Game not initialized');
+    });
+}
     
     // Action buttons
     const buySoldierBtn = document.getElementById('buySoldier');
@@ -123,6 +132,32 @@ function initializeUI() {
             }
             
             await window.game.proposeTrade(tradeData);
+        });
+    }
+    
+    // Level info toggle button
+    const toggleLevelInfoBtn = document.getElementById('toggleLevelInfoBtn');
+    if (toggleLevelInfoBtn) {
+        toggleLevelInfoBtn.addEventListener('click', () => {
+            if (window.game) window.game.toggleLevelInfo();
+        });
+    }
+    
+    // Close info button
+    const closeInfoBtn = document.getElementById('closeInfoBtn');
+    if (closeInfoBtn) {
+        closeInfoBtn.addEventListener('click', () => {
+            if (window.game) window.game.hideLevelInfo();
+        });
+    }
+    
+    // Close panel when clicking outside
+    const levelInfoPanel = document.getElementById('levelInfoPanel');
+    if (levelInfoPanel) {
+        levelInfoPanel.addEventListener('click', (e) => {
+            if (e.target === levelInfoPanel) {
+                if (window.game) window.game.hideLevelInfo();
+            }
         });
     }
 }
