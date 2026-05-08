@@ -35,7 +35,7 @@ class AdminPanel {
         document.getElementById('refreshData')?.addEventListener('click', () => this.loadData());
         document.getElementById('resetGame')?.addEventListener('click', () => this.resetGame());
         document.getElementById('clearDefeated')?.addEventListener('click', () => this.clearDefeatedCountries());
-        document.getElementById('exportData')?.addEventListener('click', () => this.exportData());
+        document.getElementById('exportData')?.addEventListener('click', () => this.exportToSpreadsheet());
         
         document.getElementById('searchCountries')?.addEventListener('input', () => this.filterCountries());
         document.getElementById('filterType')?.addEventListener('change', () => this.filterCountries());
@@ -133,7 +133,7 @@ class AdminPanel {
         this.renderLogs(filtered);
     }
 
-     renderLogs(logs) {
+    renderLogs(logs) {
         const logsContainer = document.getElementById('actionLogsList');
         if (!logsContainer) return;
         
@@ -227,28 +227,203 @@ class AdminPanel {
         }
     }
 
-    async exportLogs() {
-        if (this.allLogs.length === 0) {
-            alert('No logs to export.');
-            return;
+    // New method to export all data to spreadsheet
+    async exportToSpreadsheet() {
+        try {
+            // Fetch all data
+            const countriesSnapshot = await this.countriesRef.once('value');
+            const tradesSnapshot = await this.tradesRef.once('value');
+            const logsSnapshot = await this.actionsLogRef.once('value');
+            
+            const countries = countriesSnapshot.val() || {};
+            const trades = tradesSnapshot.val() || {};
+            const logs = logsSnapshot.val() || {};
+            
+            // Create workbook
+            const workbook = XLSX.utils.book_new();
+            
+            // 1. Countries Sheet
+            const countriesData = this.transformCountriesToSpreadsheet(countries);
+            const countriesSheet = XLSX.utils.json_to_sheet(countriesData);
+            XLSX.utils.book_append_sheet(workbook, countriesSheet, 'Countries');
+            
+            // 2. Trades Sheet
+            const tradesData = this.transformTradesToSpreadsheet(trades);
+            const tradesSheet = XLSX.utils.json_to_sheet(tradesData);
+            XLSX.utils.book_append_sheet(workbook, tradesSheet, 'Trades');
+            
+            // 3. Action Logs Sheet
+            const logsData = this.transformLogsToSpreadsheet(logs);
+            const logsSheet = XLSX.utils.json_to_sheet(logsData);
+            XLSX.utils.book_append_sheet(workbook, logsSheet, 'Action Logs');
+            
+            // 4. Summary Sheet
+            const summaryData = this.createSummarySheet(countries, trades, logs);
+            const summarySheet = XLSX.utils.json_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
+            
+            // Auto-size columns function
+            this.autoSizeColumns(countriesSheet, countriesData);
+            this.autoSizeColumns(tradesSheet, tradesData);
+            this.autoSizeColumns(logsSheet, logsData);
+            
+            // Export file
+            const fileName = `diplomatic_export_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+            XLSX.writeFile(workbook, fileName);
+            
+            alert(`Successfully exported data to spreadsheet!\n\nCountries: ${Object.keys(countries).length}\nTrades: ${Object.keys(trades).length}\nAction Logs: ${Object.keys(logs).length}`);
+            
+        } catch (error) {
+            console.error('Error exporting to spreadsheet:', error);
+            alert('Failed to export to spreadsheet. Check console for details.');
         }
+    }
+    
+    transformCountriesToSpreadsheet(countries) {
+        const data = [];
+        for (const [id, country] of Object.entries(countries)) {
+            data.push({
+                'Country ID': id,
+                'Name': country.name || 'Unknown',
+                'Type': country.type || 'N/A',
+                'Status': country.isAlive !== false ? 'Active' : 'Defeated',
+                'Lives': country.lives || 0,
+                'Gold': country.gold?.toFixed(2) || 0,
+                'Soldiers': country.soldiers || 0,
+                'Actions': country.actions || 0,
+                'Level': country.level || 1,
+                'Upgrade Points': country.upgradePoints || 0,
+                'Neighbors Count': country.neighbors?.length || 0,
+                'Neighbors': country.neighbors?.join(', ') || '',
+                'Created At': country.createdAt ? new Date(country.createdAt).toLocaleString() : 'Unknown',
+                'Last Attack': country.lastAttack ? new Date(country.lastAttack).toLocaleString() : 'Never'
+            });
+        }
+        return data;
+    }
+    
+    transformTradesToSpreadsheet(trades) {
+        const data = [];
+        for (const [id, trade] of Object.entries(trades)) {
+            data.push({
+                'Trade ID': id,
+                'From ID': trade.fromId || 'Unknown',
+                'From Name': trade.fromName || 'Unknown',
+                'To ID': trade.toId || 'Unknown',
+                'To Name': trade.toName || 'Unknown',
+                'Gold Offered': trade.gold || 0,
+                'Soldiers Offered': trade.soldiers || 0,
+                'Actions Offered': trade.actions || 0,
+                'Status': trade.status || 'pending',
+                'Created At': trade.createdAt ? new Date(trade.createdAt).toLocaleString() : 'Unknown',
+                'Expires At': trade.expiresAt ? new Date(trade.expiresAt).toLocaleString() : 'Unknown'
+            });
+        }
+        return data;
+    }
+    
+    transformLogsToSpreadsheet(logs) {
+        const data = [];
+        for (const [id, log] of Object.entries(logs)) {
+            data.push({
+                'Log ID': id,
+                'Timestamp': log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Unknown',
+                'Player Name': log.playerName || 'Unknown',
+                'Player Type': log.playerType || 'N/A',
+                'Action': log.action || 'Unknown',
+                'Result': log.result || 'Unknown',
+                'Details': log.details || '',
+                'Target ID': log.targetId || '',
+                'Gold': log.gold?.toFixed(2) || 0,
+                'Soldiers': log.soldiers || 0,
+                'Actions Remaining': log.actions || 0,
+                'Level': log.level || 1
+            });
+        }
+        return data;
+    }
+    
+    createSummarySheet(countries, trades, logs) {
+        const countriesArray = Object.values(countries);
+        const tradesArray = Object.values(trades);
+        const logsArray = Object.values(logs);
         
-        const dataStr = JSON.stringify(this.allLogs, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `action_logs_${new Date().toISOString()}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        alert(`Exported ${this.allLogs.length} action logs!`);
+        const activeCountries = countriesArray.filter(c => c.isAlive !== false);
+        const defeatedCountries = countriesArray.filter(c => c.isAlive === false);
+        const economicCountries = activeCountries.filter(c => c.type === 'economic');
+        const wartimeCountries = activeCountries.filter(c => c.type === 'wartime');
+        
+        const pendingTrades = tradesArray.filter(t => t.status === 'pending');
+        const completedTrades = tradesArray.filter(t => t.status === 'completed');
+        const rejectedTrades = tradesArray.filter(t => t.status === 'rejected');
+        
+        const successfulActions = logsArray.filter(l => l.result === 'success');
+        const failedActions = logsArray.filter(l => l.result === 'failed');
+        const victoryActions = logsArray.filter(l => l.result === 'victory');
+        
+        const totalGold = countriesArray.reduce((sum, c) => sum + (c.gold || 0), 0);
+        const totalSoldiers = countriesArray.reduce((sum, c) => sum + (c.soldiers || 0), 0);
+        const avgLevel = countriesArray.reduce((sum, c) => sum + (c.level || 1), 0) / (countriesArray.length || 1);
+        
+        return [
+            { 'Metric': '📊 GAME SUMMARY', 'Value': '', 'Note': `Generated: ${new Date().toLocaleString()}` },
+            { 'Metric': '', 'Value': '', 'Note': '' },
+            { 'Metric': 'COUNTRIES', 'Value': '', 'Note': '' },
+            { 'Metric': '  Total Nations', 'Value': countriesArray.length, 'Note': '' },
+            { 'Metric': '  Active Nations', 'Value': activeCountries.length, 'Note': '' },
+            { 'Metric': '  Defeated Nations', 'Value': defeatedCountries.length, 'Note': '' },
+            { 'Metric': '  Economic Nations', 'Value': economicCountries.length, 'Note': '' },
+            { 'Metric': '  Wartime Nations', 'Value': wartimeCountries.length, 'Note': '' },
+            { 'Metric': '', 'Value': '', 'Note': '' },
+            { 'Metric': 'RESOURCES', 'Value': '', 'Note': '' },
+            { 'Metric': '  Total Gold', 'Value': totalGold.toFixed(2), 'Note': '💰' },
+            { 'Metric': '  Total Soldiers', 'Value': totalSoldiers, 'Note': '⚔️' },
+            { 'Metric': '  Average Level', 'Value': avgLevel.toFixed(2), 'Note': '📊' },
+            { 'Metric': '', 'Value': '', 'Note': '' },
+            { 'Metric': 'TRADES', 'Value': '', 'Note': '' },
+            { 'Metric': '  Total Trades', 'Value': tradesArray.length, 'Note': '' },
+            { 'Metric': '  Pending Trades', 'Value': pendingTrades.length, 'Note': '📨' },
+            { 'Metric': '  Completed Trades', 'Value': completedTrades.length, 'Note': '✅' },
+            { 'Metric': '  Rejected Trades', 'Value': rejectedTrades.length, 'Note': '❌' },
+            { 'Metric': '', 'Value': '', 'Note': '' },
+            { 'Metric': 'ACTIONS', 'Value': '', 'Note': '' },
+            { 'Metric': '  Total Actions', 'Value': logsArray.length, 'Note': '📝' },
+            { 'Metric': '  Successful Actions', 'Value': successfulActions.length, 'Note': '✅' },
+            { 'Metric': '  Failed Actions', 'Value': failedActions.length, 'Note': '❌' },
+            { 'Metric': '  Victories', 'Value': victoryActions.length, 'Note': '🏆' }
+        ];
+    }
+    
+    autoSizeColumns(sheet, data) {
+        if (!data || data.length === 0) return;
+        
+        const colWidths = {};
+        
+        // Get all column headers
+        const headers = Object.keys(data[0]);
+        
+        // Initialize widths with header lengths
+        headers.forEach(header => {
+            colWidths[header] = header.length;
+        });
+        
+        // Check each row for longer content
+        data.forEach(row => {
+            headers.forEach(header => {
+                const value = row[header]?.toString() || '';
+                colWidths[header] = Math.max(colWidths[header], value.length);
+            });
+        });
+        
+        // Apply column widths (Excel uses a unit where 1 char ≈ 1.14 width units)
+        const wscols = headers.map(header => ({
+            wch: Math.min(colWidths[header] + 2, 50) // Cap at 50 characters
+        }));
+        
+        sheet['!cols'] = wscols;
     }
 
-
-
-
-
-     updateGlobalStats(countries) {
+    updateGlobalStats(countries) {
         const countriesArray = Object.values(countries);
         const total = countriesArray.length;
         const active = countriesArray.filter(c => c.isAlive !== false).length;
@@ -577,21 +752,6 @@ class AdminPanel {
                 this.loadData();
             }
         }
-    }
-
-    exportData() {
-        this.countriesRef.once('value', (snapshot) => {
-            const data = snapshot.val();
-            const dataStr = JSON.stringify(data, null, 2);
-            const blob = new Blob([dataStr], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `diplomatic_backup_${new Date().toISOString()}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            alert('Data exported successfully!');
-        });
     }
 }
 
