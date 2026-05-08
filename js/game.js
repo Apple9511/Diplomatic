@@ -9,6 +9,7 @@ class Game {
         this.gameActive = true;
         this.winnerDeclared = false;
         this.currentUpgradePointsBefore = 0; // Track for animation
+        this.defeated = false;
         
         if (typeof database !== 'undefined' && database) {
             this.initializeGame();
@@ -33,6 +34,63 @@ class Game {
         this.startTradeCleanup();
         this.setupResizeHandler();
         this.setupGameOverListener();
+        this.checkDefeatAndBlock();
+    }
+
+     async checkDefeatAndBlock() {
+        const savedPlayerId = localStorage.getItem('playerId');
+        if (savedPlayerId) {
+            const snapshot = await countriesRef.child(savedPlayerId).once('value');
+            const country = snapshot.val();
+            if (country && (country.isAlive === false || country.lives <= 0)) {
+                this.defeated = true;
+                this.gameActive = false;
+                localStorage.removeItem('playerId');
+                this.showDefeatScreen('Your previous country was defeated. You cannot start a new game.');
+                this.disableGameCreation();
+            }
+        }
+    }
+
+     disableGameCreation() {
+        const creationModal = document.getElementById('creationModal');
+        if (creationModal) {
+            creationModal.classList.add('permanently-disabled');
+            const form = document.getElementById('countryCreationForm');
+            if (form) {
+                form.style.display = 'none';
+                const disabledMessage = document.createElement('div');
+                disabledMessage.className = 'disabled-message';
+                disabledMessage.innerHTML = `
+                    <div class="game-disabled">
+                        <h2>❌ GAME OVER ❌</h2>
+                        <p>You have been defeated and cannot start a new game.</p>
+                        <p>This game instance is now locked.</p>
+                        <button onclick="window.location.href='https://www.google.com'">Exit Game</button>
+                    </div>
+                `;
+                creationModal.querySelector('.modal-content').appendChild(disabledMessage);
+            }
+        }
+    }
+
+    setupGameOverListener() {
+        if (!countriesRef) return;
+        
+        countriesRef.on('child_removed', async (snapshot) => {
+            if (snapshot.key === this.currentPlayerId && !this.defeated) {
+                await this.handleDefeat('Your country has been destroyed!');
+            }
+        });
+        
+        countriesRef.on('child_changed', async (snapshot) => {
+            if (snapshot.key === this.currentPlayerId && this.gameActive && !this.defeated) {
+                const country = snapshot.val();
+                if (country && country.lives <= 0) {
+                    await this.handleDefeat('Your country has been conquered!');
+                }
+            }
+        });
     }
 
     setupGameOverListener() {
@@ -126,6 +184,23 @@ class Game {
     }
 
     async createCountry(countryData) {
+
+        if (this.defeated) {
+            this.showMessage('You have been defeated and cannot create a new country!', 'failure');
+            return null;
+        }
+
+         const savedPlayerId = localStorage.getItem('playerId');
+        if (savedPlayerId) {
+            const existingSnapshot = await countriesRef.child(savedPlayerId).once('value');
+            const existingCountry = existingSnapshot.val();
+            if (existingCountry && existingCountry.isAlive !== false && existingCountry.lives > 0) {
+                this.showMessage('You already have an active country!', 'failure');
+                return null;
+            }
+        }
+
+
         try {
             const newCountryRef = countriesRef.push();
             const countryId = newCountryRef.key;
@@ -540,15 +615,21 @@ class Game {
                 isAlive: false,
                 lives: 0
             });
+            localStorage.removeItem('playerId');
         }
         
         this.showDefeatScreen(reason);
         this.disableGameControls();
+        this.disableGameCreation();
     }
 
     showVictory(winnerName) {
         const victoryDiv = document.createElement('div');
         victoryDiv.className = 'game-overlay victory';
+        
+        // Check if current player is the winner
+        const isWinner = this.currentPlayer && this.currentPlayer.name === winnerName;
+        
         victoryDiv.innerHTML = `
             <div class="game-over-content">
                 <div class="victory-icon">🏆</div>
@@ -559,7 +640,11 @@ class Game {
                     <h3>Final Statistics</h3>
                     <div id="finalStats"></div>
                 </div>
-                <button onclick="window.location.reload()">PLAY AGAIN</button>
+                ${isWinner ? `
+                    <button onclick="window.location.reload()">PLAY AGAIN</button>
+                ` : `
+                    <button onclick="window.location.href='https://www.google.com'">EXIT GAME</button>
+                `}
                 <button onclick="window.game.showMainMenu()">MAIN MENU</button>
             </div>
         `;
@@ -581,6 +666,7 @@ class Game {
                     <h3>Your Legacy</h3>
                     <div id="finalStats"></div>
                 </div>
+                <button onclick="window.location.href='https://www.google.com'">EXIT GAME</button>
             </div>
         `;
         
@@ -624,7 +710,7 @@ class Game {
     }
 
     disableGameControls() {
-        const buttons = ['buySoldier', 'fortify', 'healNeighbor', 'upgrade', 'attackBtn', 'proposeTrade'];
+        const buttons = ['buySoldier', 'fortify', 'healNeighbor', 'upgrade', 'attackBtn', 'proposeTrade', 'convertGoldToAP'];
         buttons.forEach(btnId => {
             const btn = document.getElementById(btnId);
             if (btn) {
@@ -642,7 +728,16 @@ class Game {
                 select.style.opacity = '0.5';
             }
         });
+        
+        // Hide trade panel
+        const tradePanel = document.querySelector('.trade-panel');
+        if (tradePanel) tradePanel.style.opacity = '0.5';
+        
+        // Hide action buttons container
+        const actionsPanel = document.querySelector('.actions-panel');
+        if (actionsPanel) actionsPanel.style.opacity = '0.5';
     }
+
 
     hideGameOverScreen() {
         const overlays = document.querySelectorAll('.game-overlay');
@@ -651,6 +746,8 @@ class Game {
 
     showMainMenu() {
         localStorage.removeItem('playerId');
+        this.defeated = false;
+        this.gameActive = true;
         window.location.reload();
     }
 
