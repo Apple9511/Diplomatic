@@ -581,8 +581,6 @@ class Game {
                     <h3>Your Legacy</h3>
                     <div id="finalStats"></div>
                 </div>
-                <button onclick="window.location.reload()">PLAY AGAIN</button>
-                <button onclick="window.game.showMainMenu()">MAIN MENU</button>
             </div>
         `;
         
