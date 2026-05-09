@@ -287,52 +287,53 @@ class Game {
     }
 
     async checkAllPlayersForDailyReset() {
-        try {
-            const snapshot = await countriesRef.once('value');
-            const countries = snapshot.val();
+    try {
+        const snapshot = await countriesRef.once('value');
+        const countries = snapshot.val();
+        
+        if (!countries) return;
+        
+        const now = new Date();
+        const currentDay = now.getDate();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        
+        let anyUpdates = false;
+        
+        for (const [id, country] of Object.entries(countries)) {
+            if (country.isAlive === false) continue;
             
-            if (!countries) return;
+            const lastResetDay = country.lastResetDay;
+            const lastResetDate = country.lastDailyReset || 0;
+            const lastReset = new Date(lastResetDate);
             
-            const now = new Date();
-            const currentDay = now.getDate();
-            const currentMonth = now.getMonth();
-            const currentYear = now.getFullYear();
+            // FIX: Add a buffer to prevent multiple resets
+            const needsReset = (
+                (lastResetDay !== currentDay ||
+                lastReset.getMonth() !== currentMonth ||
+                lastReset.getFullYear() !== currentYear) &&
+                // Add this: ensure at least 12 hours have passed since last reset
+                (Date.now() - lastResetDate) > (12 * 60 * 60 * 1000)
+            );
             
-            let anyUpdates = false;
-            
-            for (const [id, country] of Object.entries(countries)) {
-                if (country.isAlive === false) continue;
-                
-                const lastResetDay = country.lastResetDay;
-                const lastResetDate = country.lastDailyReset || 0;
-                const lastReset = new Date(lastResetDate);
-                
-                // Check if reset happened on a different day
-                const needsReset = (
-                    lastResetDay !== currentDay ||
-                    lastReset.getMonth() !== currentMonth ||
-                    lastReset.getFullYear() !== currentYear
-                );
-                
-                if (needsReset) {
-                    console.log(`Daily reset needed for ${country.name} - Last reset: ${lastReset.toLocaleString()}`);
-                    await this.performDailyUpdate(id, country);
-                    anyUpdates = true;
-                }
+            if (needsReset) {
+                console.log(`Daily reset needed for ${country.name} - Last reset: ${lastReset.toLocaleString()}`);
+                await this.performDailyUpdate(id, country);
+                anyUpdates = true;
             }
-            
-            if (anyUpdates && this.currentPlayerId && this.gameActive) {
-                // Refresh current player's UI if they got updated
-                const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
-                const updatedPlayer = playerSnapshot.val();
-                if (updatedPlayer) {
-                    this.updatePlayerUI(updatedPlayer);
-                }
-            }
-        } catch (error) {
-            console.error('Error checking daily resets:', error);
         }
+        
+        if (anyUpdates && this.currentPlayerId && this.gameActive) {
+            const playerSnapshot = await countriesRef.child(this.currentPlayerId).once('value');
+            const updatedPlayer = playerSnapshot.val();
+            if (updatedPlayer) {
+                this.updatePlayerUI(updatedPlayer);
+            }
+        }
+    } catch (error) {
+        console.error('Error checking daily resets:', error);
     }
+}
 
     async performDailyUpdate(countryId, country) {
     const updates = {};
